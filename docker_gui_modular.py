@@ -55,6 +55,7 @@ from src.ui.ui_components import (
 )
 
 from src.ui.ui_display import DisplayManager
+from src.ui.terminal_panel import TerminalPanel
 from src.ui.keyboard_navigation import (
     setup_keyboard_navigation,
     enable_button_enter_key,
@@ -100,6 +101,8 @@ from src.docker.docker_tables import (
 # Import dialogs and specific features
 from src.docker.docker_gui_features import (
     pull_image_dialog,
+    push_image_dialog,
+    search_hub_dialog,
     build_image_dialog,
     reopen_latest_build_status_window,
     load_image_dialog,
@@ -282,6 +285,7 @@ class DockerGUI:
             lambda: show_used_images(self.display_manager.show_table, self.show_loading),
             lambda: show_unused_images(self.display_manager.show_table, self.show_loading),
             lambda: pull_image_dialog(self.root, lambda: show_images(self.display_manager.show_table, self.show_loading)),
+            lambda: search_hub_dialog(self.root, lambda: show_images(self.display_manager.show_table, self.show_loading)),
             lambda: build_image_dialog(
                 self.root,
                 self.display_manager.show_text_output,
@@ -335,6 +339,7 @@ class DockerGUI:
             "Volumes": "💾",
             "Networks": "🕸",
             "Compose": "🧩",
+            "Terminal": "🖥",
             "Stats": "📊",
         }
         for category in menu_structure.keys():
@@ -433,12 +438,15 @@ class DockerGUI:
         table_frame, table_widget, action_frame = self.create_table_widget(output_container)
         
         # Initialize display manager
-        self.display_manager = DisplayManager(output_container, table_frame, text_frame, 
+        self.display_manager = DisplayManager(output_container, table_frame, text_frame,
                                               table_widget, text_widget, action_frame)
-        
+
+        # Terminal panel — lives inside output_container, shown only when Terminal is active
+        self._terminal_panel = TerminalPanel(output_container)
+
         # Setup action buttons
         self.setup_action_buttons(action_frame)
-        
+
         # Setup context menus
         setup_text_context_menu(text_widget, self.root)
         setup_table_context_menu(table_widget, self.root)
@@ -923,10 +931,24 @@ class DockerGUI:
         self._docker_info_panel.pack_forget()
         if category == "Docker":
             self._docker_info_panel.pack(fill=tk.X, pady=(0, 6))
-        
+
+        # Show/hide terminal panel
+        self._terminal_panel.pack_forget()
+        if category == "Terminal":
+            self._terminal_panel.pack(fill=tk.BOTH, expand=True)
+            self._terminal_panel.focus_input()
+            self.btn_frame.config(text="Terminal — Shell")
+            ttk.Button(
+                self.btn_frame, text="🗑 Clear",
+                style="secondary.TButton",
+                command=self._terminal_panel.clear,
+            ).grid(row=0, column=0, padx=5, pady=5, sticky="ew")
+            self.btn_frame.columnconfigure(0, weight=1)
+            return
+
         # Update label
         self.btn_frame.config(text=f"{category} - Actions")
-        
+
         # Show buttons
         buttons = self.menu_structure.get(category, [])
         # Semantic style map: keywords in button text → ttkbootstrap style

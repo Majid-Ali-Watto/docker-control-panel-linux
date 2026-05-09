@@ -93,7 +93,7 @@ class DisplayManager:
         # Show buttons based on table type
         if self.current_table_type == 'container':
             for btn_name in ['start', 'stop', 'restart', 'pause', 'unpause', 'rename',
-                             'delete', 'terminal', 'logs', 'inspect_container', 'commit']:
+                             'delete', 'terminal', 'logs', 'inspect_container', 'commit', 'browse_files']:
                 if btn_name in self.action_buttons and self.action_buttons[btn_name].winfo_exists():
                     self.action_buttons[btn_name].pack(side=tk.LEFT, padx=2)
         elif self.current_table_type == 'container_stats':
@@ -109,7 +109,7 @@ class DisplayManager:
                 ):
                     widget.pack(side=tk.RIGHT, padx=5)
         elif self.current_table_type == 'image':
-            for btn_name in ['delete_image', 'run', 'stop_using', 'tag_image',
+            for btn_name in ['delete_image', 'push_image', 'run', 'stop_using', 'tag_image',
                              'save_image', 'inspect_image', 'history_image']:
                 if btn_name in self.action_buttons and self.action_buttons[btn_name].winfo_exists():
                     self.action_buttons[btn_name].pack(side=tk.LEFT, padx=2)

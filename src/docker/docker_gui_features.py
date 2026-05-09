@@ -16,7 +16,8 @@ from src.ui.ui_components import create_table_widget, Tooltip
 from src.utils.threads import startThreadForTask
 from src.docker.docker_operations import run_docker_cmd, stream_docker_cmd, cancel_stream
 from src.docker.docker_commands_constants import (
-    DOCKER_PULL, DOCKER_RUN_DETACHED, DOCKER_INSPECT_ANCESTOR,
+    DOCKER_PULL, DOCKER_IMAGE_PUSH, DOCKER_SEARCH,
+    DOCKER_RUN_DETACHED, DOCKER_INSPECT_ANCESTOR,
     DOCKER_DISK_USAGE_VERBOSE, DOCKER_NETWORK_NAMES, DOCKER_IMAGE_BUILD,
     DOCKER_IMAGE_LOAD, DOCKER_VOLUME_CREATE, DOCKER_NETWORK_CREATE,
     DOCKER_COMPOSE_UP
@@ -362,6 +363,215 @@ def pull_image_dialog(root, refresh_callback):
     image_entry.bind("<Escape>", lambda e: dialog.destroy())
 
 
+def push_image_dialog(root, image_ref="", refresh_callback=None):
+    """Push a Docker image to a registry."""
+    if not check_docker_running(): return
+
+    dialog = tk.Toplevel(root)
+    dialog.title("Push Docker Image")
+    dialog.resizable(False, False)
+    dialog.transient(root)
+    dialog.grab_set()
+
+    ttk.Label(dialog, text="Image to push (registry/repo:tag):", font=("Arial", 10)).pack(
+        pady=(20, 6), padx=20, anchor="w")
+
+    image_var = tk.StringVar(value=image_ref)
+    image_entry = ttk.Entry(dialog, textvariable=image_var, font=("Arial", 11), width=46)
+    image_entry.pack(pady=(0, 4), padx=20, fill=tk.X)
+    image_entry.focus()
+    if image_ref:
+        image_entry.select_range(0, tk.END)
+
+    ttk.Label(
+        dialog,
+        text="Examples:  docker.io/username/myimage:1.0   or   myregistry.io/repo:tag",
+        font=("Arial", 8), foreground="gray",
+    ).pack(padx=20, anchor="w")
+
+    status_label = ttk.Label(dialog, text="", font=("Arial", 9))
+    status_label.pack(pady=8)
+
+    btn_frame = ttk.Frame(dialog)
+    btn_frame.pack(pady=(4, 20))
+    btn_push = ttk.Button(btn_frame, text="Push", style="primary.TButton", width=12)
+    btn_push.pack(side=tk.LEFT, padx=5)
+    ttk.Button(btn_frame, text="Cancel", command=dialog.destroy, width=12).pack(side=tk.LEFT, padx=5)
+
+    _center_dialog(dialog, min_width=500)
+
+    def on_push():
+        image = image_var.get().strip()
+        if not image:
+            messagebox.showwarning("Input Required", "Please enter an image name.", parent=dialog)
+            return
+        btn_push.config(state=tk.DISABLED)
+        status_label.config(text="⏳ Pushing image… (this may take a while)", foreground="orange")
+        dialog.update()
+
+        def push_task():
+            result = run_cmd(
+                DOCKER_IMAGE_PUSH.format(image=_quote(image)),
+                sudo=True, sudo_password=get_sudo_password(),
+            )
+            dialog.after(0, lambda: on_push_complete(result))
+
+        startThreadForTask(push_task)
+
+    def on_push_complete(result):
+        result_lower = result.lower()
+        if any(k in result_lower for k in ("pushed", "digest:", "layer already exists", "latest: digest")):
+            status_label.config(text="✅ Image pushed successfully!", foreground="green")
+            dialog.after(2000, dialog.destroy)
+            if refresh_callback:
+                root.after(2100, refresh_callback)
+        else:
+            btn_push.config(state=tk.NORMAL)
+            status_label.config(text="❌ Push failed", foreground="red")
+            messagebox.showerror("Push Failed", f"Failed to push image:\n{result[:500]}", parent=dialog)
+
+    btn_push.config(command=on_push)
+    image_entry.bind("<Return>", lambda e: on_push())
+    image_entry.bind("<Escape>", lambda e: dialog.destroy())
+
+
+def search_hub_dialog(root, refresh_callback=None):
+    """Search Docker Hub for images and optionally pull one."""
+    if not check_docker_running(): return
+
+    dialog = tk.Toplevel(root)
+    dialog.title("Search Docker Hub")
+    dialog.transient(root)
+    dialog.grab_set()
+
+    # Search bar
+    search_frame = ttk.Frame(dialog)
+    search_frame.pack(fill=tk.X, padx=12, pady=(12, 4))
+
+    ttk.Label(search_frame, text="Search:", font=("Arial", 10)).pack(side=tk.LEFT, padx=(0, 6))
+    term_var = tk.StringVar()
+    search_entry = ttk.Entry(search_frame, textvariable=term_var, font=("Arial", 11))
+    search_entry.pack(side=tk.LEFT, fill=tk.X, expand=True)
+    search_entry.focus()
+    btn_search = ttk.Button(search_frame, text="🔍 Search", style="primary.TButton", width=12)
+    btn_search.pack(side=tk.LEFT, padx=(6, 0))
+
+    status_label = ttk.Label(dialog, text="Type a term and press Search or Enter",
+                              font=("Arial", 9), foreground="gray")
+    status_label.pack(padx=12, anchor="w", pady=(2, 0))
+
+    # Results table
+    table_frame = ttk.Frame(dialog)
+    table_frame.pack(fill=tk.BOTH, expand=True, padx=12, pady=(6, 0))
+
+    columns = ("NAME", "DESCRIPTION", "STARS", "OFFICIAL")
+    table = ttk.Treeview(table_frame, columns=columns, show="headings", selectmode="browse")
+    for col, w in [("NAME", 200), ("DESCRIPTION", 380), ("STARS", 70), ("OFFICIAL", 80)]:
+        table.heading(col, text=col)
+        anchor = "center" if col in ("STARS", "OFFICIAL") else "w"
+        table.column(col, width=w, minwidth=max(50, w // 2), anchor=anchor)
+
+    scroll_y = ttk.Scrollbar(table_frame, orient=tk.VERTICAL, command=table.yview)
+    scroll_y.pack(side=tk.RIGHT, fill=tk.Y)
+    table.configure(yscrollcommand=scroll_y.set)
+    table.pack(fill=tk.BOTH, expand=True)
+
+    # Footer
+    footer = ttk.Frame(dialog)
+    footer.pack(fill=tk.X, padx=12, pady=10)
+
+    btn_pull = ttk.Button(footer, text="⬇ Pull Selected", style="success.TButton", width=16,
+                          state=tk.DISABLED)
+    btn_pull.pack(side=tk.LEFT)
+    ttk.Label(footer, text="Double-click or select + Pull to download",
+              font=("Arial", 8), foreground="gray").pack(side=tk.LEFT, padx=10)
+    ttk.Button(footer, text="Close", width=10, command=dialog.destroy).pack(side=tk.RIGHT)
+
+    def do_search():
+        term = term_var.get().strip()
+        if not term:
+            messagebox.showwarning("Input Required", "Please enter a search term.", parent=dialog)
+            return
+        btn_search.config(state=tk.DISABLED)
+        btn_pull.config(state=tk.DISABLED)
+        status_label.config(text=f"⏳ Searching for '{term}'…", foreground="orange")
+        for row in table.get_children():
+            table.delete(row)
+        dialog.update()
+
+        def search_task():
+            result = run_cmd(DOCKER_SEARCH.format(term=_quote(term)))
+            dialog.after(0, lambda: on_search_complete(result, term))
+
+        startThreadForTask(search_task)
+
+    def on_search_complete(result, term):
+        btn_search.config(state=tk.NORMAL)
+        rows = []
+        for line in result.split('\n'):
+            parts = line.split('\t')
+            if len(parts) >= 4:
+                rows.append(parts[:4])
+
+        if not rows:
+            status_label.config(text=f"No results found for '{term}'", foreground="gray")
+            return
+
+        for i, row in enumerate(rows):
+            tag = 'oddrow' if i % 2 else 'evenrow'
+            table.insert("", tk.END, values=row, tags=(tag,))
+        status_label.config(
+            text=f"Found {len(rows)} result(s) — select one and click Pull to download",
+            foreground="green",
+        )
+
+    def on_select(event):
+        btn_pull.config(state=tk.NORMAL if table.selection() else tk.DISABLED)
+
+    def do_pull():
+        sel = table.selection()
+        if not sel:
+            return
+        image_name = str(table.item(sel[0])['values'][0])
+        status_label.config(text=f"⏳ Pulling {image_name}…", foreground="orange")
+        btn_pull.config(state=tk.DISABLED)
+        btn_search.config(state=tk.DISABLED)
+        dialog.update()
+
+        def pull_task():
+            result = run_cmd(
+                DOCKER_PULL.format(image_name=image_name),
+                sudo=True, sudo_password=get_sudo_password(),
+            )
+            dialog.after(0, lambda: on_pull_complete(result, image_name))
+
+        startThreadForTask(pull_task)
+
+    def on_pull_complete(result, image_name):
+        btn_search.config(state=tk.NORMAL)
+        btn_pull.config(state=tk.NORMAL)
+        if any(k in result for k in ("Downloaded", "up to date", "Status: Image is up to date")):
+            status_label.config(text=f"✅ {image_name} pulled successfully!", foreground="green")
+            if refresh_callback:
+                root.after(800, refresh_callback)
+        else:
+            status_label.config(text=f"❌ Pull failed for {image_name}", foreground="red")
+            messagebox.showerror("Pull Failed", f"Failed to pull image:\n{result[:500]}", parent=dialog)
+
+    table.bind("<<TreeviewSelect>>", on_select)
+    table.bind("<Double-1>", lambda e: do_pull() if table.selection() else None)
+    btn_search.config(command=do_search)
+    btn_pull.config(command=do_pull)
+    search_entry.bind("<Return>", lambda e: do_search())
+    search_entry.bind("<Escape>", lambda e: dialog.destroy())
+
+    dialog.update_idletasks()
+    w, h = 860, 520
+    x = (dialog.winfo_screenwidth() - w) // 2
+    y = (dialog.winfo_screenheight() - h) // 2
+    dialog.geometry(f"{w}x{h}+{x}+{y}")
+
+
 def build_image_dialog(root, show_text_output_callback, refresh_callback=None):
     """Build a Docker image from a local context directory."""
     if not check_docker_running(): return
@@ -664,6 +874,233 @@ def compose_up_from_file_dialog(root, show_text_output_callback, refresh_callbac
         startThreadForTask(task)
 
     _run_compose_up()
+
+
+def browse_container_files_dialog(root, display_manager):
+    """Browse the filesystem of a running container with download/upload support."""
+    if not check_docker_running(): return
+
+    selection = display_manager.get_selected_items()
+    if not selection:
+        messagebox.showwarning("No Selection", "Please select a container from the table")
+        return
+    if len(selection) > 1:
+        messagebox.showwarning("Multiple Selection", "Please select only one container")
+        return
+
+    values = display_manager.get_item_values(selection[0])
+    container_id = values[1]
+    container_name = values[2]
+
+    dialog = tk.Toplevel(root)
+    dialog.title(f"File Browser — {container_name} ({container_id[:12]})")
+    dialog.transient(root)
+    dialog.grab_set()
+
+    # ── Nav bar ──────────────────────────────────────────────────
+    nav_frame = ttk.Frame(dialog)
+    nav_frame.pack(fill=tk.X, padx=10, pady=(10, 4))
+
+    ttk.Label(nav_frame, text="Path:", font=("Arial", 10)).pack(side=tk.LEFT)
+    path_var = tk.StringVar(value="/")
+    path_entry = ttk.Entry(nav_frame, textvariable=path_var, font=("JetBrains Mono", 10))
+    path_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(6, 4))
+    btn_go = ttk.Button(nav_frame, text="Go", width=5)
+    btn_go.pack(side=tk.LEFT, padx=(0, 3))
+    btn_up = ttk.Button(nav_frame, text="⬆ Up", width=7)
+    btn_up.pack(side=tk.LEFT, padx=(0, 3))
+    btn_refresh = ttk.Button(nav_frame, text="🔄", width=4)
+    btn_refresh.pack(side=tk.LEFT)
+
+    # ── File table ───────────────────────────────────────────────
+    table_frame = ttk.Frame(dialog)
+    table_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=(0, 4))
+
+    columns = ("name", "perms", "size", "date", "owner")
+    table = ttk.Treeview(table_frame, columns=columns, show="headings", selectmode="browse")
+    for col, lbl, w, anchor in [
+        ("name",  "Name",        240, "w"),
+        ("perms", "Permissions", 110, "w"),
+        ("size",  "Size",         80, "e"),
+        ("date",  "Date",        130, "w"),
+        ("owner", "Owner",        90, "w"),
+    ]:
+        table.heading(col, text=lbl)
+        table.column(col, width=w, minwidth=max(50, w // 2), anchor=anchor)
+
+    scroll_y = ttk.Scrollbar(table_frame, orient=tk.VERTICAL, command=table.yview)
+    scroll_y.pack(side=tk.RIGHT, fill=tk.Y)
+    scroll_x = ttk.Scrollbar(table_frame, orient=tk.HORIZONTAL, command=table.xview)
+    scroll_x.pack(side=tk.BOTTOM, fill=tk.X)
+    table.configure(yscrollcommand=scroll_y.set, xscrollcommand=scroll_x.set)
+    table.pack(fill=tk.BOTH, expand=True)
+
+    # ── Footer ───────────────────────────────────────────────────
+    footer = ttk.Frame(dialog)
+    footer.pack(fill=tk.X, padx=10, pady=(0, 10))
+
+    btn_download = ttk.Button(footer, text="⬇ Download", style="success.TButton", width=13,
+                              state=tk.DISABLED)
+    btn_download.pack(side=tk.LEFT, padx=(0, 4))
+    btn_upload = ttk.Button(footer, text="⬆ Upload", style="info.TButton", width=11)
+    btn_upload.pack(side=tk.LEFT)
+    status_var = tk.StringVar(value="Loading…")
+    ttk.Label(footer, textvariable=status_var, font=("Arial", 9),
+              foreground="gray").pack(side=tk.LEFT, padx=10)
+    ttk.Button(footer, text="Close", width=9, command=dialog.destroy).pack(side=tk.RIGHT)
+
+    # ── State ────────────────────────────────────────────────────
+    current_path = ["/"]
+    _row_meta = {}  # iid -> {'type': 'd'/'f'/'l', 'name': str}
+
+    def _parse_ls(output):
+        entries = []
+        for line in output.split('\n'):
+            line = line.rstrip()
+            if not line or line.startswith('total'):
+                continue
+            parts = line.split(None, 8)
+            if len(parts) < 9:
+                continue
+            perms = parts[0]
+            owner = parts[2]
+            size = parts[4]
+            date_str = f"{parts[5]} {parts[6]} {parts[7]}"
+            name = parts[8]
+            if name in ('.', '..'):
+                continue
+            etype = 'd' if perms.startswith('d') else ('l' if perms.startswith('l') else 'f')
+            icon = '📁' if etype == 'd' else ('🔗' if etype == 'l' else '📄')
+            entries.append({
+                'type': etype,
+                'name': name,
+                'display': f"{icon} {name}",
+                'perms': perms,
+                'size': '' if etype == 'd' else size,
+                'date': date_str,
+                'owner': owner,
+            })
+        entries.sort(key=lambda e: (0 if e['type'] == 'd' else 1, e['name'].lower()))
+        return entries
+
+    def _load_path(path):
+        current_path[0] = path
+        path_var.set(path)
+        status_var.set(f"Loading {path}…")
+        btn_download.config(state=tk.DISABLED)
+        for row in table.get_children():
+            table.delete(row)
+        _row_meta.clear()
+        dialog.update()
+
+        def task():
+            result = run_cmd(f"docker exec {container_id} ls -la {_quote(path)}")
+            dialog.after(0, lambda: _on_loaded(result, path))
+
+        startThreadForTask(task)
+
+    def _on_loaded(result, path):
+        if any(k in result for k in ('Error response from daemon', 'No such container',
+                                      'OCI runtime exec failed', 'executable file not found')):
+            status_var.set(f"❌ {result.split(chr(10))[0][:100]}")
+            return
+
+        entries = _parse_ls(result)
+        for i, e in enumerate(entries):
+            tag = 'oddrow' if i % 2 else 'evenrow'
+            iid = table.insert("", tk.END,
+                               values=(e['display'], e['perms'], e['size'], e['date'], e['owner']),
+                               tags=(tag,))
+            _row_meta[iid] = {'type': e['type'], 'name': e['name']}
+
+        count = len(entries)
+        status_var.set(f"{count} item(s)  —  {path}")
+
+    def _go_to(event=None):
+        _load_path(path_var.get().strip() or "/")
+
+    def _navigate_up():
+        path = current_path[0].rstrip('/')
+        parent = path.rsplit('/', 1)[0] or '/'
+        _load_path(parent)
+
+    def _on_select(event):
+        btn_download.config(state=tk.NORMAL if table.selection() else tk.DISABLED)
+
+    def _on_double_click(event):
+        sel = table.selection()
+        if not sel:
+            return
+        meta = _row_meta.get(sel[0])
+        if not meta:
+            return
+        if meta['type'] == 'd':
+            base = current_path[0].rstrip('/')
+            _load_path(f"{base}/{meta['name']}")
+        else:
+            _do_download()
+
+    def _do_download():
+        sel = table.selection()
+        if not sel:
+            return
+        meta = _row_meta.get(sel[0])
+        if not meta:
+            return
+        raw_name = meta['name'].split(' -> ')[0].strip()
+        base = current_path[0].rstrip('/')
+        src_path = f"{base}/{raw_name}"
+        local_dest = filedialog.asksaveasfilename(
+            parent=dialog, title="Save to host",
+            initialfile=raw_name.rsplit('/', 1)[-1],
+        )
+        if not local_dest:
+            return
+        status_var.set(f"⏳ Copying {raw_name}…")
+        dialog.update()
+
+        def task():
+            result = run_cmd(f"docker cp {container_id}:{_quote(src_path)} {_quote(local_dest)}")
+            msg = (f"✅ Saved → {local_dest}" if not result.strip() or result.strip().lower().startswith('successfully')
+                   else f"❌ {result[:120]}")
+            dialog.after(0, lambda: status_var.set(msg))
+
+        startThreadForTask(task)
+
+    def _do_upload():
+        src = filedialog.askopenfilename(parent=dialog, title="Choose file to upload to container")
+        if not src:
+            return
+        dest_path = current_path[0].rstrip('/') + '/'
+        fname = src.rsplit('/', 1)[-1]
+        status_var.set(f"⏳ Uploading {fname}…")
+        dialog.update()
+
+        def task():
+            result = run_cmd(f"docker cp {_quote(src)} {container_id}:{_quote(dest_path)}")
+            dialog.after(0, lambda: (_load_path(current_path[0])
+                                     if not result.strip() or result.strip().lower().startswith('successfully')
+                                     else status_var.set(f"❌ {result[:120]}")))
+
+        startThreadForTask(task)
+
+    # Wire up
+    btn_go.config(command=_go_to)
+    btn_up.config(command=_navigate_up)
+    btn_refresh.config(command=lambda: _load_path(current_path[0]))
+    btn_download.config(command=_do_download)
+    btn_upload.config(command=_do_upload)
+    table.bind("<<TreeviewSelect>>", _on_select)
+    table.bind("<Double-1>", _on_double_click)
+    path_entry.bind("<Return>", _go_to)
+
+    dialog.update_idletasks()
+    w, h = 780, 500
+    x = (dialog.winfo_screenwidth() - w) // 2
+    y = (dialog.winfo_screenheight() - h) // 2
+    dialog.geometry(f"{w}x{h}+{x}+{y}")
+
+    _load_path("/")
 
 
 def open_container_terminal_dialog(root, display_manager):
@@ -1379,7 +1816,7 @@ def create_selected_item_actions(action_frame, root, display_manager, refresh_im
         DOCKER_CONTAINER_START, DOCKER_CONTAINER_STOP, DOCKER_CONTAINER_RESTART,
         DOCKER_CONTAINER_RM, DOCKER_CONTAINER_PAUSE, DOCKER_CONTAINER_UNPAUSE,
         DOCKER_CONTAINER_RENAME, DOCKER_CONTAINER_COMMIT, DOCKER_CONTAINER_INSPECT,
-        DOCKER_IMAGE_RM, DOCKER_IMAGE_TAG, DOCKER_IMAGE_SAVE, DOCKER_IMAGE_HISTORY,
+        DOCKER_IMAGE_RM, DOCKER_IMAGE_PUSH, DOCKER_IMAGE_TAG, DOCKER_IMAGE_SAVE, DOCKER_IMAGE_HISTORY,
         DOCKER_IMAGE_INSPECT, DOCKER_VOLUME_RM, DOCKER_VOLUME_INSPECT,
         DOCKER_NETWORK_RM, DOCKER_NETWORK_INSPECT, DOCKER_NETWORK_CONNECT,
         DOCKER_NETWORK_DISCONNECT, DOCKER_COMPOSE_UP, DOCKER_COMPOSE_DOWN,
@@ -1588,6 +2025,13 @@ def create_selected_item_actions(action_frame, root, display_manager, refresh_im
             DOCKER_IMAGE_TAG.format(source=_quote(_image_ref(rows[0])), target=_quote(target_tag)),
             "Image Tag",
         )
+
+    def push_selected_image():
+        if not check_docker_running(): return
+        rows = _selected_rows("image", table_type='image', allow_multiple=False)
+        if not rows:
+            return
+        push_image_dialog(root, image_ref=_image_ref(rows[0]), refresh_callback=refresh_images_callback)
 
     def save_selected_image():
         if not check_docker_running(): return
@@ -2005,6 +2449,11 @@ def create_selected_item_actions(action_frame, root, display_manager, refresh_im
                                       command=commit_selected_container)
     Tooltip(btn_commit_container, ACTION_TOOLTIPS["commit_container"])
 
+    btn_browse_files = ttk.Button(action_frame, text="📂 Files",
+                                   style="info.Outline.TButton",
+                                   command=lambda: browse_container_files_dialog(root, display_manager))
+    Tooltip(btn_browse_files, ACTION_TOOLTIPS["browse_files"])
+
     btn_delete_image = ttk.Button(action_frame, text="🗑 Delete Image",
                                   style="danger.Outline.TButton",
                                   command=delete_selected_image)
@@ -2014,6 +2463,11 @@ def create_selected_item_actions(action_frame, root, display_manager, refresh_im
                                style="info.Outline.TButton",
                                command=tag_selected_image)
     Tooltip(btn_tag_image, ACTION_TOOLTIPS["tag_image"])
+
+    btn_push_image = ttk.Button(action_frame, text="⬆ Push",
+                                style="primary.Outline.TButton",
+                                command=push_selected_image)
+    Tooltip(btn_push_image, ACTION_TOOLTIPS["push_image"])
 
     btn_save_image = ttk.Button(action_frame, text="💾 Save",
                                 style="secondary.Outline.TButton",
@@ -2112,8 +2566,10 @@ def create_selected_item_actions(action_frame, root, display_manager, refresh_im
         'logs': btn_view_logs,
         'inspect_container': btn_inspect_container,
         'commit': btn_commit_container,
+        'browse_files': btn_browse_files,
         'delete_image': btn_delete_image,
         'tag_image': btn_tag_image,
+        'push_image': btn_push_image,
         'save_image': btn_save_image,
         'inspect_image': btn_inspect_image,
         'history_image': btn_history_image,
