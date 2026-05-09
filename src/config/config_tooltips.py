@@ -10,6 +10,7 @@ SIDEBAR_TOOLTIPS = {
     "Networks": "Inspect and manage Docker bridge and user-defined networks",
     "Compose": "Manage Docker Compose projects and their services",
     "Stats": "Monitor real-time container stats and disk usage",
+    "Terminal": "General-purpose shell — run any command, navigate directories",
 }
 
 CATEGORY_TOOLTIPS = {
@@ -34,6 +35,7 @@ CATEGORY_TOOLTIPS = {
         "Used": "Show images currently in use by at least one container",
         "Unused": "Show images not attached to any container (safe to delete)",
         "Pull": "Download a new image from Docker Hub\n(e.g. nginx:latest, ubuntu:22.04)",
+        "Search Hub": "Search Docker Hub for public images by keyword",
         "Build": "Build a Docker image from a folder containing a Dockerfile",
         "Build Status": "Reopen the latest image build progress or final result window",
         "Load": "Import an image archive created with docker save",
@@ -83,7 +85,9 @@ ACTION_TOOLTIPS = {
     "view_logs": "View stdout/stderr logs for the selected container",
     "inspect_container": "Show full docker inspect output for the selected container",
     "commit_container": "Create a new image snapshot from the selected container",
+    "browse_files": "Browse the container filesystem, download or upload files",
     "delete_image": "Delete the selected image(s)",
+    "push_image": "Push the selected image to a registry (Docker Hub or private)",
     "tag_image": "Create a new tag for the selected image",
     "save_image": "Export the selected image to a tar archive",
     "inspect_image": "Show detailed metadata for the selected image",

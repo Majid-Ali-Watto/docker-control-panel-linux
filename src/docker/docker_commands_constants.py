@@ -37,6 +37,9 @@ DOCKER_CONTAINER_RENAME = "docker rename {old_name} {new_name}"
 DOCKER_CONTAINER_COMMIT = "docker commit {container} {image}"
 DOCKER_CONTAINER_INSPECT = "docker inspect {container}"
 DOCKER_CONTAINER_LOGS = "docker logs {timestamps_flag} --tail {lines} {container}"
+DOCKER_EXEC_LS = "docker exec {container} ls -la {path}"
+DOCKER_CP_FROM = "docker cp {container}:{src} {dest}"
+DOCKER_CP_TO = "docker cp {src} {container}:{dest}"
 
 # Image commands
 DOCKER_IMAGES_ALL = "docker images --format '{{.Repository}}\t{{.Tag}}\t{{.ID}}\t{{.Size}}'"
@@ -86,8 +89,10 @@ DOCKER_INSPECT_IMAGE = "docker inspect --format='{{{{.Image}}}}' {container_id}"
 DOCKER_INSPECT_MOUNTS = "docker inspect --format='{{{{json .Mounts}}}}' {container_name}"
 DOCKER_INSPECT_ANCESTOR = "docker ps -a --filter ancestor={image_id} --format '{{{{.ID}}}}'"
 
-# Pull command
+# Pull / push commands
 DOCKER_PULL = "docker pull {image_name}"
+DOCKER_IMAGE_PUSH = "docker push {image}"
+DOCKER_SEARCH = "docker search --format '{{{{.Name}}}}\t{{{{.Description}}}}\t{{{{.StarCount}}}}\t{{{{.IsOfficial}}}}' {term}"
 
 # Run command
 DOCKER_RUN_DETACHED = "docker run -d --restart {restart_policy}{name}{ports}{envs}{volumes}{network}{extra_args}{image}{command}"
