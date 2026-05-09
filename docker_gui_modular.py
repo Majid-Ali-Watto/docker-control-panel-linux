@@ -6,25 +6,45 @@ A graphical user interface for managing Docker containers, images, and volumes.
 This is the refactored main entry point following DRY and SOC patterns.
 """
 
+import sys
+import os
+import glob
+
+# Prefer venv packages so ttkbootstrap uses the correct Pillow version
+_venv_pkgs = glob.glob(
+    os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                 '.venv', 'lib', 'python*', 'site-packages')
+)
+for _p in _venv_pkgs:
+    if _p not in sys.path:
+        sys.path.insert(0, _p)
+
 import tkinter as tk
 from tkinter import ttk, messagebox
-import sys
+import ttkbootstrap as ttkbs
 
 # Import configuration modules
-from src.config.config_themes import themes
+from src.config.config_themes import themes, DEFAULT_THEME
+from src.config.config_tooltips import (
+    SIDEBAR_TOOLTIPS,
+    CATEGORY_TOOLTIPS,
+    SIDEBAR_BOTTOM_TOOLTIPS,
+)
 from src.help.help_commands import commands_info
 from src.help.help_info import help_info
 from src.config.config_menu import get_menu_structure
 
 # Import utility modules
-from src.utils.utils import check_docker_installed, is_docker_running
-from src.config.config_manager import CONFIG_FILE
+from src.utils.utils import check_docker_installed, is_docker_running, check_terminal_installed
+from src.config.config_manager import has_saved_password, load_selected_theme, save_selected_theme
 from src.ui.ui_components import (
-    prompt_password_dialog, 
+    prompt_password_dialog,
     prompt_docker_installation,
     change_password_dialog,
-    delete_password_dialog
+    delete_password_dialog,
+    Tooltip,
 )
+
 from src.ui.ui_display import DisplayManager
 from src.ui.keyboard_navigation import (
     setup_keyboard_navigation,
@@ -77,16 +97,19 @@ class DockerGUI:
     """Main Docker GUI Application"""
     
     def __init__(self):
-        self.root = tk.Tk()
-        self.root.title("Docker Control Panel (Ubuntu)")
+        saved_theme = load_selected_theme()
+        self.initial_theme = saved_theme if saved_theme in themes else DEFAULT_THEME
+
+        self.root = ttkbs.Window(
+            title="Docker Control Panel",
+            themename=themes[self.initial_theme]["ttkbs_theme"]
+        )
         
         # Setup window geometry
-        # Update to ensure proper screen dimensions are retrieved
         self.root.update_idletasks()
         screen_width = self.root.winfo_screenwidth()
         screen_height = self.root.winfo_screenheight()
         
-        # Use more conservative sizing with bounds checking
         window_width = min(int(screen_width * 0.85), 1920)
         window_height = min(int(screen_height * 0.75), 1080)
         min_width = min(int(screen_width * 0.5), 800)
@@ -94,6 +117,10 @@ class DockerGUI:
         
         self.root.geometry(f"{window_width}x{window_height}")
         self.root.minsize(min_width, min_height)
+        
+        # References to manually themed widgets (updated on theme change)
+        self.sidebar = None
+        self.header_frame = None
         
         # State variables
         self.docker_status_var = tk.StringVar()
@@ -114,7 +141,22 @@ class DockerGUI:
             messagebox.showinfo("Application Closed", "Please install Docker and restart the application.")
             self.root.destroy()
             sys.exit(0)
-        
+
+        # Check for a terminal emulator (needed for the Container Terminal feature)
+        if not check_terminal_installed():
+            proceed = messagebox.askyesno(
+                "No Terminal Emulator Found",
+                "The Container Terminal feature requires a terminal emulator,\n"
+                "but none was found on your system.\n\n"
+                "Install one with:\n"
+                "    sudo apt install tilix\n\n"
+                "Continue without terminal support?",
+                icon="warning",
+            )
+            if not proceed:
+                self.root.destroy()
+                sys.exit(0)
+
         # Prompt for password
         if not prompt_password_dialog(self.root, None):
             messagebox.showerror("Error", "Sudo password is required to run this application")
@@ -128,21 +170,43 @@ class DockerGUI:
         self.select_initial_category()
     
     def setup_styles(self):
-        """Setup TTK styles"""
-        self.style = ttk.Style()
-        self.style.theme_use("default")
-        self.current_theme = "Default"
+        """Setup TTK styles via ttkbootstrap"""
+        self.style = ttkbs.Style()  # returns the singleton created by Window
+        self.current_theme = self.initial_theme
+        self._configure_treeview_grid(themes[self.current_theme])
+    
+    def _configure_treeview_grid(self, theme):
+        """Apply cell-border / grid-line styling to the Treeview widget."""
+        border_color = theme.get("tree_border", "#555555")
         
-        # Configure active button style
-        self.style.configure('Active.TButton', background='#0078d4', foreground='white')
-        self.style.map('Active.TButton',
-            background=[('active', '#0078d4'), ('!active', '#0078d4')],
-            foreground=[('active', 'white'), ('!active', 'white')]
+        # fieldbackground is the "canvas" behind rows; row tags paint their own
+        # background, so the 1–2 px gap between rows exposes this border color
+        # → horizontal grid lines.
+        self.style.configure(
+            "Treeview",
+            background=border_color,
+            fieldbackground=border_color,
+            rowheight=28,
+            font=("JetBrains Mono", 9),
+            borderwidth=1,
+            relief="flat",
+        )
+        # Headings: groove relief gives a raised look that doubles as a vertical
+        # column separator visible in the header band.
+        self.style.configure(
+            "Treeview.Heading",
+            font=("Arial", 9, "bold"),
+            relief="groove",
+            borderwidth=1,
+            padding=(6, 7),
         )
     
     def create_widgets(self):
         """Create all UI widgets"""
-        # Main container
+        # Header bar
+        self.create_header(self.root)
+        
+        # Main container below header
         main_container = ttk.Frame(self.root)
         main_container.pack(fill=tk.BOTH, expand=True)
         
@@ -152,19 +216,49 @@ class DockerGUI:
         # Create main content area
         self.create_main_content(main_container)
     
+    def create_header(self, parent):
+        """Create top header bar with app branding"""
+        theme = themes[self.current_theme]
+        self.header_frame = tk.Frame(parent, bg=theme["header_bg"], height=48)
+        self.header_frame.pack(fill=tk.X, side=tk.TOP)
+        self.header_frame.pack_propagate(False)
+        
+        # Docker whale logo + title
+        tk.Label(
+            self.header_frame,
+            text="🐳  Docker Control Panel",
+            bg=theme["header_bg"],
+            fg="white",
+            font=("JetBrains Mono", 14, "bold")
+        ).pack(side=tk.LEFT, padx=16, pady=10)
+        
+        # Docker status badge on the right
+        self.header_status_label = tk.Label(
+            self.header_frame,
+            textvariable=self.docker_status_var,
+            bg=theme["header_bg"],
+            fg="#aaaaaa",
+            font=("JetBrains Mono", 9)
+        )
+        self.header_status_label.pack(side=tk.RIGHT, padx=16, pady=10)
+    
     def create_sidebar(self, parent):
         """Create left sidebar with menu"""
-        sidebar = ttk.Frame(parent, width=200, relief=tk.RIDGE, borderwidth=2)
-        sidebar.pack(side=tk.LEFT, fill=tk.Y, padx=(5, 0), pady=5)
-        sidebar.pack_propagate(False)
+        theme = themes[self.current_theme]
+        self.sidebar = tk.Frame(parent, width=210, bg=theme["sidebar_bg"])
+        self.sidebar.pack(side=tk.LEFT, fill=tk.Y)
+        self.sidebar.pack_propagate(False)
+        sidebar = self.sidebar
         
         # Sidebar title
-        ttk.Label(sidebar, text="Docker Control", font=("JetBrains Mono", 12, "bold")).pack(pady=10)
+        tk.Label(
+            sidebar, text="Navigation",
+            bg=theme["sidebar_bg"], fg="#888888",
+            font=("Arial", 8, "bold")
+        ).pack(pady=(14, 2), padx=14, anchor=tk.W)
         
-        # Theme selector
-        self.create_theme_selector(sidebar)
-        
-        ttk.Separator(sidebar, orient=tk.HORIZONTAL).pack(fill=tk.X, pady=10, padx=5)
+        # Thin separator line
+        tk.Frame(sidebar, bg="#333355", height=1).pack(fill=tk.X, padx=14, pady=(4, 8))
         
         # Menu structure
         menu_structure = get_menu_structure(
@@ -174,23 +268,23 @@ class DockerGUI:
                                        self.show_loading, self.display_manager.show_text_output),
             lambda: restart_docker_service(self.root, self.docker_status_var, 
                                           self.show_loading, self.display_manager.show_text_output),
-            lambda: clean_all_resources(self.display_manager.show_text_output, self.root),
+            lambda: clean_all_resources(self.display_manager.show_text_output, self.root, self.show_loading),
             lambda: show_all_containers(self.display_manager.show_table, self.show_loading),
             lambda: show_running_containers(self.display_manager.show_table, self.show_loading),
             lambda: show_stopped_containers(self.display_manager.show_table, self.show_loading),
-            lambda: start_all_containers(self.display_manager.show_text_output),
-            lambda: stop_all_containers(self.display_manager.show_text_output),
-            lambda: restart_all_containers(self.display_manager.show_text_output),
-            lambda: delete_all_containers(self.display_manager.show_text_output, self.root),
+            lambda: start_all_containers(self.display_manager.show_text_output, self.show_loading),
+            lambda: stop_all_containers(self.display_manager.show_text_output, self.show_loading),
+            lambda: restart_all_containers(self.display_manager.show_text_output, self.show_loading),
+            lambda: delete_all_containers(self.display_manager.show_text_output, self.root, self.show_loading),
             lambda: show_images(self.display_manager.show_table, self.show_loading),
             lambda: show_used_images(self.display_manager.show_table, self.show_loading),
             lambda: show_unused_images(self.display_manager.show_table, self.show_loading),
             lambda: pull_image_dialog(self.root, lambda: show_images(self.display_manager.show_table, self.show_loading)),
-            lambda: delete_all_images(self.display_manager.show_text_output, self.root),
+            lambda: delete_all_images(self.display_manager.show_text_output, self.root, self.show_loading),
             lambda: show_volumes(self.display_manager.show_table, self.show_loading),
-            lambda: prune_volumes(self.display_manager.show_text_output, self.root),
-            lambda: delete_used_volumes(self.display_manager.show_text_output, self.root),
-            lambda: delete_all_volumes(self.display_manager.show_text_output, self.root),
+            lambda: prune_volumes(self.display_manager.show_text_output, self.root, self.show_loading),
+            lambda: delete_used_volumes(self.display_manager.show_text_output, self.root, self.show_loading),
+            lambda: delete_all_volumes(self.display_manager.show_text_output, self.root, self.show_loading),
             lambda: show_containers_with_stats(self.display_manager.show_table, self.show_loading, self.display_manager),
             lambda: docker_disk_usage_view(self.display_manager.output_container, self.show_loading),
             lambda: show_docker_disk_storage_simple(self.display_manager.show_table, self.show_loading)
@@ -199,11 +293,23 @@ class DockerGUI:
         self.menu_structure = menu_structure
         
         # Create sidebar menu buttons
+        icons = {"Docker": "🐳", "Containers": "📦", "Images": "🖼", "Volumes": "💾", "Stats": "📊"}
         for category in menu_structure.keys():
-            btn = ttk.Button(sidebar, text=category, 
-                           command=self.make_sidebar_command(category), width=20)
-            btn.pack(pady=5, padx=10)
+            icon = icons.get(category, "•")
+            btn = ttk.Button(
+                sidebar, text=f"  {icon}  {category}",
+                command=self.make_sidebar_command(category), width=22
+            )
+            btn.pack(pady=3, padx=10, fill=tk.X)
             self.sidebar_buttons[category] = btn
+            if category in SIDEBAR_TOOLTIPS:
+                Tooltip(btn, SIDEBAR_TOOLTIPS[category])
+        
+        # Separator before bottom area
+        tk.Frame(sidebar, bg="#333355", height=1).pack(fill=tk.X, padx=14, pady=(12, 8))
+        
+        # Theme selector
+        self.create_theme_selector(sidebar)
         
         # Password management and status at bottom
         self.create_sidebar_bottom(sidebar)
@@ -213,10 +319,10 @@ class DockerGUI:
         theme_frame = ttk.Frame(parent)
         theme_frame.pack(pady=5, padx=10, fill=tk.X)
         
-        ttk.Label(theme_frame, text="Theme:", font=("Arial", 9)).pack(anchor=tk.W, pady=(0, 2))
+        ttk.Label(theme_frame, text="🎨 Theme", font=("Arial", 9)).pack(anchor=tk.W, pady=(0, 4))
         
-        self.theme_var = tk.StringVar(value="Default")
-        theme_combo = ttk.Combobox(theme_frame, textvariable=self.theme_var, 
+        self.theme_var = tk.StringVar(value=self.current_theme)
+        theme_combo = ttk.Combobox(theme_frame, textvariable=self.theme_var,
                                    values=list(themes.keys()), state="readonly", width=17)
         theme_combo.pack(fill=tk.X)
         theme_combo.bind("<<ComboboxSelected>>", lambda e: self.apply_theme(self.theme_var.get()))
@@ -227,42 +333,42 @@ class DockerGUI:
         bottom_frame.pack(side=tk.BOTTOM, fill=tk.X, padx=10, pady=10)
         
         # Password management
-        password_frame = ttk.LabelFrame(bottom_frame, text="Password", padding=5)
-        password_frame.pack(fill=tk.X, pady=(0, 10))
+        password_frame = ttk.LabelFrame(bottom_frame, text="🔑 Password", padding=5)
+        password_frame.pack(fill=tk.X, pady=(0, 8))
         
-        password_status = ttk.Label(password_frame, 
-                                    text="Saved" if CONFIG_FILE.exists() else "Not Saved", 
-                                    font=("Arial", 8))
+        password_status = ttk.Label(
+            password_frame,
+            text="● Saved" if has_saved_password() else "○ Not Saved",
+            font=("Arial", 8)
+        )
         password_status.pack(pady=2)
         
-        ttk.Button(password_frame, text="Change", 
-                  command=lambda: change_password_dialog(self.root), width=8).pack(side=tk.LEFT, padx=2, pady=2)
-        ttk.Button(password_frame, text="Delete", 
-                  command=delete_password_dialog, width=8).pack(side=tk.LEFT, padx=2, pady=2)
-        
+        pw_btn_row = ttk.Frame(password_frame)
+        pw_btn_row.pack()
+        btn_change = ttk.Button(pw_btn_row, text="Change", style="secondary.TButton",
+                                command=lambda: change_password_dialog(self.root), width=8)
+        btn_change.pack(side=tk.LEFT, padx=2, pady=2)
+        Tooltip(btn_change, SIDEBAR_BOTTOM_TOOLTIPS["change_password"])
+
+        btn_del_pw = ttk.Button(pw_btn_row, text="Delete", style="danger.Outline.TButton",
+                                command=delete_password_dialog, width=8)
+        btn_del_pw.pack(side=tk.LEFT, padx=2, pady=2)
+        Tooltip(btn_del_pw, SIDEBAR_BOTTOM_TOOLTIPS["delete_password"])
+
         # Relaunch app button
-        ttk.Separator(bottom_frame, orient=tk.HORIZONTAL).pack(fill=tk.X, pady=(10, 5))
-        ttk.Button(bottom_frame, text="🔄 Relaunch App", 
-                  command=self.relaunch_app, width=18).pack(fill=tk.X, pady=(0, 10))
-        
-        # Docker status
-        ttk.Separator(bottom_frame, orient=tk.HORIZONTAL).pack(fill=tk.X, pady=(0, 10))
-        status_label = ttk.Label(bottom_frame, textvariable=self.docker_status_var, 
-                                font=("JetBrains Mono", 9, "bold"), wraplength=180)
-        status_label.pack()
+        btn_relaunch = ttk.Button(bottom_frame, text="🔄 Relaunch App", style="secondary.TButton",
+                                  command=self.relaunch_app)
+        btn_relaunch.pack(fill=tk.X, pady=(6, 0))
+        Tooltip(btn_relaunch, SIDEBAR_BOTTOM_TOOLTIPS["relaunch_app"])
     
     def create_main_content(self, parent):
         """Create main content area"""
-        main_frame = ttk.Frame(parent, padding=10)
+        main_frame = ttk.Frame(parent, padding=(10, 8, 10, 8))
         main_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         
-        # Buttons frame
-        self.btn_frame = ttk.LabelFrame(main_frame, text="Select a category from sidebar", padding=10)
-        self.btn_frame.pack(fill=tk.X, pady=5)
-        
-        # Loading indicator
-        self.loading_label = ttk.Label(main_frame, text="", font=("JetBrains Mono", 10), foreground="orange")
-        self.loading_label.pack(fill=tk.X, pady=2)
+        # Action toolbar frame
+        self.btn_frame = ttk.LabelFrame(main_frame, text="Select a category from the sidebar", padding=(10, 8))
+        self.btn_frame.pack(fill=tk.X, pady=(0, 6))
         
         # Content area with output and help
         content_area = ttk.Frame(main_frame)
@@ -293,6 +399,7 @@ class DockerGUI:
     
     def create_help_panel(self, parent):
         """Create help panel with tabs"""
+        theme = themes[self.current_theme]
         help_panel = ttk.Frame(parent, width=300)
         help_panel.pack_propagate(False)
         
@@ -302,34 +409,51 @@ class DockerGUI:
         
         # Commands tab
         commands_tab = ttk.Frame(help_notebook)
-        help_notebook.add(commands_tab, text="Commands")
-        commands_text = tk.Text(commands_tab, wrap=tk.WORD, font=("Arial", 9), 
-                               bg="#f9f9f9", fg="#333333")
-        commands_text.pack(fill=tk.BOTH, expand=True)
+        help_notebook.add(commands_tab, text=" Commands ")
+        commands_text = tk.Text(
+            commands_tab, wrap=tk.WORD,
+            font=("JetBrains Mono", 9),
+            bg=theme["text_bg"], fg=theme["text_fg"],
+            relief=tk.FLAT, borderwidth=0, padx=8, pady=6
+        )
+        commands_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         commands_scroll = ttk.Scrollbar(commands_tab, orient=tk.VERTICAL, command=commands_text.yview)
         commands_scroll.pack(side=tk.RIGHT, fill=tk.Y)
         commands_text.configure(yscrollcommand=commands_scroll.set)
         commands_text.insert("1.0", commands_info)
         commands_text.config(state=tk.DISABLED)
+        self._help_cmd_text = commands_text
         
         # Help tab
         help_tab = ttk.Frame(help_notebook)
-        help_notebook.add(help_tab, text="Help")
-        help_text = tk.Text(help_tab, wrap=tk.WORD, font=("Arial", 9), 
-                           bg="#f9f9f9", fg="#333333")
-        help_text.pack(fill=tk.BOTH, expand=True)
+        help_notebook.add(help_tab, text=" Help ")
+        help_text = tk.Text(
+            help_tab, wrap=tk.WORD,
+            font=("JetBrains Mono", 9),
+            bg=theme["text_bg"], fg=theme["text_fg"],
+            relief=tk.FLAT, borderwidth=0, padx=8, pady=6
+        )
+        help_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         help_scroll = ttk.Scrollbar(help_tab, orient=tk.VERTICAL, command=help_text.yview)
         help_scroll.pack(side=tk.RIGHT, fill=tk.Y)
         help_text.configure(yscrollcommand=help_scroll.set)
         help_text.insert("1.0", help_info)
         help_text.config(state=tk.DISABLED)
+        self._help_text = help_text
         
         return help_panel
     
     def create_text_widget(self, parent):
         """Create text output widget"""
+        theme = themes[self.current_theme]
         text_frame = ttk.Frame(parent)
-        text_widget = tk.Text(text_frame, wrap=tk.NONE, font=("JetBrains Mono", 10))
+        text_widget = tk.Text(
+            text_frame, wrap=tk.NONE,
+            font=("JetBrains Mono", 10),
+            bg=theme["text_bg"], fg=theme["text_fg"],
+            insertbackground=theme["text_fg"],
+            relief=tk.FLAT, borderwidth=0, padx=8, pady=6
+        )
         text_widget.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         
         scroll_y = ttk.Scrollbar(text_frame, orient=tk.VERTICAL, command=text_widget.yview)
@@ -383,37 +507,118 @@ class DockerGUI:
         self.root.bind("<Control-Right>", move_to_main)
         self.root.bind("<Control-Left>", move_to_sidebar)
     
+    _SPINNER_FRAMES = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏']
+
     def show_loading(self, visible):
-        """Show or hide loading indicator"""
+        """Show or hide loading overlay (thread-safe: schedules UI work on main thread)."""
         if visible:
-            self.loading_label.config(text="⏳ Loading...")
+            self.root.after(0, self._show_loading_overlay)
         else:
-            self.loading_label.config(text="")
+            self.root.after(0, self._hide_loading_overlay)
+
+    def _show_loading_overlay(self):
+        if getattr(self, '_loading_active', False):
+            return
+        self._loading_active = True
+        self._spinner_frame_idx = 0
+        self._spinner_job = None
+
+        overlay = tk.Frame(
+            self.display_manager.output_container,
+            bg='#1c2333', relief='groove', bd=2
+        )
+        overlay.place(relx=0.5, rely=0.5, anchor='center')
+
+        self._spinner_lbl = tk.Label(
+            overlay, text=self._SPINNER_FRAMES[0],
+            font=('JetBrains Mono', 32), bg='#1c2333', fg='#4ea8f7'
+        )
+        self._spinner_lbl.pack(padx=40, pady=(20, 6))
+
+        tk.Label(
+            overlay, text='Loading…',
+            font=('Arial', 11), bg='#1c2333', fg='#9ab0cc'
+        ).pack(padx=40, pady=(0, 20))
+
+        self._loading_overlay = overlay
+        self._tick_spinner()
+
+    def _tick_spinner(self):
+        if not getattr(self, '_loading_active', False):
+            return
+        overlay = getattr(self, '_loading_overlay', None)
+        if not overlay or not overlay.winfo_exists():
+            return
+        self._spinner_frame_idx = (self._spinner_frame_idx + 1) % len(self._SPINNER_FRAMES)
+        self._spinner_lbl.config(text=self._SPINNER_FRAMES[self._spinner_frame_idx])
+        self._spinner_job = self.root.after(100, self._tick_spinner)
+
+    def _hide_loading_overlay(self):
+        self._loading_active = False
+        job = getattr(self, '_spinner_job', None)
+        if job:
+            self.root.after_cancel(job)
+            self._spinner_job = None
+        overlay = getattr(self, '_loading_overlay', None)
+        if overlay and overlay.winfo_exists():
+            overlay.destroy()
+        self._loading_overlay = None
     
     def apply_theme(self, theme_name):
-        """Apply selected theme"""
+        """Apply selected ttkbootstrap theme"""
+        if theme_name not in themes:
+            theme_name = DEFAULT_THEME
+
         self.current_theme = theme_name
         theme = themes[theme_name]
+        self.theme_var.set(theme_name)
         
-        self.style.theme_use(theme["ttk_theme"])
+        # Switch ttkbootstrap theme (updates all ttk widgets automatically)
+        self.style.theme_use(theme["ttkbs_theme"])
         
-        # Configure active button style
-        self.style.configure('Active.TButton', background=theme["button_active"], 
-                           foreground=theme["button_active_fg"])
-        self.style.map('Active.TButton',
-            background=[('active', theme["button_active"]), ('!active', theme["button_active"])],
-            foreground=[('active', theme["button_active_fg"]), ('!active', theme["button_active_fg"])]
+        # Update manually-coloured tk widgets
+        self.root.configure(bg=theme["root_bg"])
+        
+        if self.header_frame and self.header_frame.winfo_exists():
+            self.header_frame.configure(bg=theme["header_bg"])
+            for child in self.header_frame.winfo_children():
+                if isinstance(child, tk.Label):
+                    child.configure(bg=theme["header_bg"])
+        
+        if self.sidebar and self.sidebar.winfo_exists():
+            self.sidebar.configure(bg=theme["sidebar_bg"])
+            for child in self.sidebar.winfo_children():
+                if isinstance(child, tk.Frame):
+                    child.configure(bg=theme["sidebar_bg"])
+                elif isinstance(child, tk.Label):
+                    child.configure(bg=theme["sidebar_bg"])
+        
+        self.display_manager.text_widget.configure(
+            bg=theme["text_bg"], fg=theme["text_fg"],
+            insertbackground=theme["text_fg"]
         )
         
-        self.root.configure(bg=theme["bg"])
-        self.display_manager.text_widget.configure(bg=theme["text_bg"], fg=theme["text_fg"], 
-                                                   insertbackground=theme["text_fg"])
+        # Update help panel text widgets if they exist
+        if hasattr(self, '_help_cmd_text') and self._help_cmd_text.winfo_exists():
+            self._help_cmd_text.configure(bg=theme["text_bg"], fg=theme["text_fg"])
+        if hasattr(self, '_help_text') and self._help_text.winfo_exists():
+            self._help_text.configure(bg=theme["text_bg"], fg=theme["text_fg"])
         
-        # Reapply active styles
-        if self.active_button:
-            self.active_button.configure(style='Active.TButton')
-        if self.active_sidebar_button:
-            self.active_sidebar_button.configure(style='Active.TButton')
+        # Update treeview alternating rows
+        tw = self.display_manager.table_widget
+        tw.tag_configure('oddrow', background=theme["tree_odd"])
+        tw.tag_configure('evenrow', background=theme["tree_even"])
+        
+        # Reapply cell-border / grid-line treeview styling for new theme
+        self._configure_treeview_grid(theme)
+        
+        # Reapply active button highlights
+        if self.active_button and self.active_button.winfo_exists():
+            self.active_button.configure(style='primary.TButton')
+        if self.active_sidebar_button and self.active_sidebar_button.winfo_exists():
+            self.active_sidebar_button.configure(style='primary.TButton')
+
+        save_selected_theme(theme_name)
     
     def make_sidebar_command(self, category):
         """Create sidebar button command"""
@@ -424,7 +629,7 @@ class DockerGUI:
             
             # Highlight current sidebar button
             if category in self.sidebar_buttons:
-                self.sidebar_buttons[category].configure(style='Active.TButton')
+                self.sidebar_buttons[category].configure(style='primary.TButton')
                 self.active_sidebar_button = self.sidebar_buttons[category]
                 self.active_sidebar_button_ref['button'] = self.active_sidebar_button
             
@@ -454,13 +659,18 @@ class DockerGUI:
         # Show/hide help panel BEFORE creating buttons
         self.help_panel.pack_forget()
         if category == "Docker":
-            self.help_panel.pack(side=tk.RIGHT, fill=tk.Y, padx=(5, 0))
+            self.help_panel.pack(side=tk.RIGHT, fill=tk.Y, padx=(8, 0))
         
         # Update label
         self.btn_frame.config(text=f"{category} - Actions")
         
         # Show buttons
         buttons = self.menu_structure.get(category, [])
+        # Semantic style map: keywords in button text → ttkbootstrap style
+        _DANGER_WORDS = ("delete", "clean", "prune", "remove")
+        _WARN_WORDS = ("stop",)
+        _SUCCESS_WORDS = ("start", "run", "pull")
+
         max_cols = 7
         for i, (text, cmd) in enumerate(buttons):
             def make_command(command, btn_text):
@@ -468,12 +678,20 @@ class DockerGUI:
                     # Reset all button styles
                     if self.active_button:
                         self.active_button.state(['!pressed'])
-                        self.active_button.configure(style='TButton')
+                        t_lower = self.active_button.cget('text').lower()
+                        if any(w in t_lower for w in _DANGER_WORDS):
+                            self.active_button.configure(style='danger.Outline.TButton')
+                        elif any(w in t_lower for w in _WARN_WORDS):
+                            self.active_button.configure(style='warning.Outline.TButton')
+                        elif any(w in t_lower for w in _SUCCESS_WORDS):
+                            self.active_button.configure(style='success.Outline.TButton')
+                        else:
+                            self.active_button.configure(style='TButton')
                     
                     # Highlight current button
                     btn = self.category_buttons.get(btn_text)
                     if btn:
-                        btn.configure(style='Active.TButton')
+                        btn.configure(style='primary.TButton')
                         self.active_button = btn
                     
                     # Execute command
@@ -481,14 +699,29 @@ class DockerGUI:
                         command()
                 return wrapper
             
-            btn = ttk.Button(self.btn_frame, text=text, command=make_command(cmd, text))
+            # Choose initial button style based on label text
+            text_lower = text.lower()
+            if any(w in text_lower for w in _DANGER_WORDS):
+                init_style = 'danger.Outline.TButton'
+            elif any(w in text_lower for w in _WARN_WORDS):
+                init_style = 'warning.Outline.TButton'
+            elif any(w in text_lower for w in _SUCCESS_WORDS):
+                init_style = 'success.Outline.TButton'
+            else:
+                init_style = 'TButton'
+            
+            btn = ttk.Button(self.btn_frame, text=text, style=init_style,
+                             command=make_command(cmd, text))
             btn.grid(row=i // max_cols, column=i % max_cols, padx=5, pady=5, sticky="ew")
             self.category_buttons[text] = btn
             enable_button_enter_key(btn)
+            tip_text = CATEGORY_TOOLTIPS.get(category, {}).get(text)
+            if tip_text:
+                Tooltip(btn, tip_text)
             
             # Execute first command automatically for non-Docker categories
             if i == 0 and cmd and category not in ["Docker"]:
-                btn.configure(style='Active.TButton')
+                btn.configure(style='primary.TButton')
                 self.active_button = btn
                 cmd()
         
@@ -498,12 +731,18 @@ class DockerGUI:
     def select_initial_category(self):
         """Select Docker category on startup"""
         if "Docker" in self.sidebar_buttons:
-            self.sidebar_buttons["Docker"].configure(style='Active.TButton')
+            self.sidebar_buttons["Docker"].configure(style='primary.TButton')
             self.active_sidebar_button = self.sidebar_buttons["Docker"]
             self.active_sidebar_button_ref['button'] = self.active_sidebar_button
         self.show_category_buttons("Docker")
         # Ensure help panel is visible for Docker category
-        self.help_panel.pack(side=tk.RIGHT, fill=tk.Y, padx=(5, 0))
+        self.help_panel.pack(side=tk.RIGHT, fill=tk.Y, padx=(8, 0))
+        # Apply initial theme colours to treeview
+        theme = themes[self.current_theme]
+        tw = self.display_manager.table_widget
+        tw.tag_configure('oddrow', background=theme["tree_odd"])
+        tw.tag_configure('evenrow', background=theme["tree_even"])
+        self._configure_treeview_grid(theme)
     
     def relaunch_app(self):
         """Relaunch the application"""

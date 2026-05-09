@@ -3,9 +3,48 @@ Utilities Module
 Common utility functions for Docker operations and checks.
 """
 
+import os
 import subprocess
 import threading
 from src.utils.threads import startThreadForTask
+
+# Terminals tried in preference order
+_KNOWN_TERMINALS = [
+    'tilix', 'gnome-terminal', 'x-terminal-emulator',
+    'xfce4-terminal', 'konsole', 'mate-terminal', 'terminator', 'xterm',
+]
+
+
+def clean_subprocess_env():
+    """Return os.environ with snap-injected overrides stripped.
+
+    When the app runs inside VS Code (snap), GTK/GIO/GDK vars point at
+    snap-internal paths that break system binaries like tilix/gnome-terminal
+    with a libpthread symbol error.  Removing them lets each binary find its
+    own runtime libraries from the system prefix.
+    """
+    _DROP = {
+        'GDK_PIXBUF_MODULEDIR', 'GDK_PIXBUF_MODULE_FILE',
+        'GIO_MODULE_DIR', 'GSETTINGS_SCHEMA_DIR',
+        'GTK_EXE_PREFIX', 'GTK_IM_MODULE_FILE', 'GTK_PATH',
+        'LOCPATH', 'GIO_LAUNCHED_DESKTOP_FILE',
+    }
+    env = {k: v for k, v in os.environ.items()
+           if k not in _DROP and 'SNAP' not in k}
+    # Strip snap dirs from PATH
+    env['PATH'] = ':'.join(
+        p for p in env.get('PATH', '').split(':') if '/snap/' not in p
+    ) or '/usr/bin:/usr/local/bin:/bin'
+    return env
+
+
+def check_terminal_installed():
+    """Return the name of the first available terminal emulator, or None."""
+    import shutil
+    for term in _KNOWN_TERMINALS:
+        if shutil.which(term):
+            return term
+    return None
 
 # Global variable to track and cancel running operations
 _current_operation = {'event': None}

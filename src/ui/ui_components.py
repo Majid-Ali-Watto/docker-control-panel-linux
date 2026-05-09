@@ -8,6 +8,65 @@ from tkinter import ttk, messagebox
 import subprocess
 
 
+class Tooltip:
+    """Lightweight hover tooltip for any Tkinter widget."""
+
+    def __init__(self, widget, text, delay=500):
+        self.widget = widget
+        self.text = text
+        self.delay = delay
+        self._job = None
+        self._tip = None
+        widget.bind("<Enter>", self._schedule, add="+")
+        widget.bind("<Leave>", self._cancel, add="+")
+        widget.bind("<ButtonPress>", self._cancel, add="+")
+
+    def _schedule(self, _event=None):
+        self._cancel()
+        self._job = self.widget.after(self.delay, self._show)
+
+    def _cancel(self, _event=None):
+        if self._job:
+            self.widget.after_cancel(self._job)
+            self._job = None
+        if self._tip:
+            self._tip.destroy()
+            self._tip = None
+
+    def _show(self):
+        widget = self.widget
+        try:
+            x = widget.winfo_rootx() + widget.winfo_width() // 2
+            y = widget.winfo_rooty() + widget.winfo_height() + 6
+        except Exception:
+            return
+
+        tip = tk.Toplevel(widget)
+        tip.wm_overrideredirect(True)
+        tip.wm_attributes("-topmost", True)
+
+        tk.Label(
+            tip, text=self.text,
+            bg="#1c2333", fg="#d0e8ff",
+            font=("Arial", 9),
+            relief="flat",
+            padx=10, pady=6,
+            wraplength=300, justify="left",
+        ).pack()
+
+        tip.update_idletasks()
+        tip_w = tip.winfo_reqwidth()
+        tip_h = tip.winfo_reqheight()
+        screen_w = widget.winfo_screenwidth()
+        screen_h = widget.winfo_screenheight()
+
+        tx = max(4, min(x - tip_w // 2, screen_w - tip_w - 4))
+        ty = (widget.winfo_rooty() - tip_h - 6) if (y + tip_h > screen_h - 8) else y
+
+        tip.wm_geometry(f"+{tx}+{ty}")
+        self._tip = tip
+
+
 def prompt_password_dialog(root, on_success_callback):
     """Prompt user for sudo password with a dialog"""
     from src.config.config_manager import load_saved_password, save_password, set_sudo_password
@@ -39,16 +98,16 @@ def prompt_password_dialog(root, on_success_callback):
     
     result = {'password': None, 'save': False, 'cancelled': False}
     
-    ttk.Label(dialog, text="Enter your sudo password:", font=("Arial", 11)).pack(pady=(20, 10))
+    ttk.Label(dialog, text="🔑  Enter your sudo password:", font=("Arial", 11, "bold")).pack(pady=(20, 6))
     
     password_var = tk.StringVar()
-    password_entry = ttk.Entry(dialog, textvariable=password_var, show="*", font=("Arial", 11), width=30)
+    password_entry = ttk.Entry(dialog, textvariable=password_var, show="*", font=("JetBrains Mono", 11), width=30)
     password_entry.pack(pady=5)
     password_entry.focus()
     
     save_var = tk.BooleanVar(value=False)
     save_check = ttk.Checkbutton(dialog, text="Remember password", variable=save_var)
-    save_check.pack(pady=10)
+    save_check.pack(pady=8)
     
     # Enable keyboard navigation in dialog
     password_entry.bind("<Tab>", lambda e: save_check.focus() or "break")
@@ -61,7 +120,6 @@ def prompt_password_dialog(root, on_success_callback):
             result['save'] = save_var.get()
             dialog.destroy()
         else:
-            # Make warning appear on top of password dialog
             dialog.attributes('-topmost', False)
             messagebox.showwarning("Password Required", "Please enter a password", parent=dialog)
             dialog.attributes('-topmost', True)
@@ -72,8 +130,10 @@ def prompt_password_dialog(root, on_success_callback):
     
     btn_frame = ttk.Frame(dialog)
     btn_frame.pack(pady=10)
-    ttk.Button(btn_frame, text="OK", command=on_ok, width=10).pack(side=tk.LEFT, padx=5)
-    ttk.Button(btn_frame, text="Cancel", command=on_cancel, width=10).pack(side=tk.LEFT, padx=5)
+    ttk.Button(btn_frame, text="Unlock", style="primary.TButton",
+               command=on_ok, width=10).pack(side=tk.LEFT, padx=5)
+    ttk.Button(btn_frame, text="Cancel", style="secondary.Outline.TButton",
+               command=on_cancel, width=10).pack(side=tk.LEFT, padx=5)
     
     password_entry.bind("<Return>", lambda e: on_ok())
     password_entry.bind("<Escape>", lambda e: on_cancel())
@@ -165,26 +225,30 @@ def prompt_docker_installation():
 
 def change_password_dialog(root):
     """Change sudo password dialog"""
-    from src.config.config_manager import save_password, delete_saved_password, set_sudo_password, CONFIG_FILE
+    from src.config.config_manager import (
+        save_password,
+        delete_saved_password,
+        set_sudo_password,
+        has_saved_password,
+    )
     
     dialog = tk.Toplevel(root)
     dialog.title("Change Password")
-    dialog.geometry("350x150")
     dialog.resizable(False, False)
     dialog.transient(root)
     dialog.grab_set()
-    
-    ttk.Label(dialog, text="Enter new sudo password:", font=("Arial", 10)).pack(pady=(15, 5))
-    
+
+    ttk.Label(dialog, text="Enter new sudo password:", font=("Arial", 10)).pack(pady=(20, 6), padx=24)
+
     password_var = tk.StringVar()
     password_entry = ttk.Entry(dialog, textvariable=password_var, show="*", font=("Arial", 10), width=30)
-    password_entry.pack(pady=5)
+    password_entry.pack(pady=5, padx=24)
     password_entry.focus()
-    
-    save_var = tk.BooleanVar(value=CONFIG_FILE.exists())
+
+    save_var = tk.BooleanVar(value=has_saved_password())
     save_check = ttk.Checkbutton(dialog, text="Remember password", variable=save_var)
-    save_check.pack(pady=8)
-    
+    save_check.pack(pady=10)
+
     def on_ok():
         pwd = password_var.get()
         if pwd:
@@ -197,13 +261,26 @@ def change_password_dialog(root):
             dialog.destroy()
         else:
             messagebox.showwarning("Password Required", "Please enter a password", parent=dialog)
-    
+
     from src.ui.keyboard_navigation import enable_button_enter_key
-    update_btn = ttk.Button(dialog, text="Update", command=on_ok, width=15)
-    update_btn.pack(pady=5)
+
+    btn_frame = ttk.Frame(dialog)
+    btn_frame.pack(pady=(4, 20))
+    update_btn = ttk.Button(btn_frame, text="Update", style="primary.TButton", command=on_ok, width=12)
+    update_btn.pack(side=tk.LEFT, padx=5)
+    ttk.Button(btn_frame, text="Cancel", style="secondary.Outline.TButton",
+               command=dialog.destroy, width=12).pack(side=tk.LEFT, padx=5)
+
+    # Auto-size to fit all widgets, then center
+    dialog.update_idletasks()
+    w = max(dialog.winfo_reqwidth() + 20, 360)
+    h = dialog.winfo_reqheight() + 16
+    x = (dialog.winfo_screenwidth() - w) // 2
+    y = (dialog.winfo_screenheight() - h) // 2
+    dialog.geometry(f"{w}x{h}+{x}+{y}")
+
     password_entry.bind("<Return>", lambda e: on_ok())
-    
-    # Enable keyboard navigation
+    password_entry.bind("<Escape>", lambda e: dialog.destroy())
     password_entry.bind("<Tab>", lambda e: save_check.focus() or "break")
     save_check.bind("<Tab>", lambda e: update_btn.focus() or "break")
     enable_button_enter_key(update_btn)
