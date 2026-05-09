@@ -23,6 +23,8 @@ class DisplayManager:
         self.current_table_type = None
         self.all_tables_data = []
         self.search_entry = None
+        self.live_stats_enabled = False
+        self.live_stats_job = None
         
         # Action buttons (will be set by main)
         self.action_buttons = {}
@@ -36,6 +38,17 @@ class DisplayManager:
     def cancel_running_operations(self):
         """Cancel any currently running operations"""
         cancel_current_operation()
+        self.stop_live_stats()
+
+    def stop_live_stats(self):
+        """Stop any live stats refresh loop."""
+        self.live_stats_enabled = False
+        if self.live_stats_job:
+            try:
+                self.output_container.after_cancel(self.live_stats_job)
+            except Exception:
+                pass
+            self.live_stats_job = None
     
     def clear_table(self):
         """Clear all items from table"""
@@ -79,32 +92,49 @@ class DisplayManager:
         
         # Show buttons based on table type
         if self.current_table_type == 'container':
-            for btn_name in ['start', 'stop', 'delete', 'terminal', 'logs']:
+            for btn_name in ['start', 'stop', 'restart', 'pause', 'unpause', 'rename',
+                             'delete', 'terminal', 'logs', 'inspect_container', 'commit']:
                 if btn_name in self.action_buttons and self.action_buttons[btn_name].winfo_exists():
                     self.action_buttons[btn_name].pack(side=tk.LEFT, padx=2)
         elif self.current_table_type == 'container_stats':
             # For container stats, show regular container action buttons
-            for btn_name in ['start', 'stop', 'delete', 'terminal', 'logs']:
+            for btn_name in ['start', 'stop', 'restart', 'pause', 'unpause',
+                             'delete', 'terminal', 'logs', 'inspect_container']:
                 if btn_name in self.action_buttons and self.action_buttons[btn_name].winfo_exists():
                     self.action_buttons[btn_name].pack(side=tk.LEFT, padx=2)
-            # And also show refresh button
+            # And also show stats control buttons
             for widget in self.action_frame.winfo_children():
-                if isinstance(widget, ttk.Button) and "Refresh" in str(widget.cget("text")):
+                if isinstance(widget, ttk.Button) and (
+                    "Refresh" in str(widget.cget("text")) or "Live Stats" in str(widget.cget("text"))
+                ):
                     widget.pack(side=tk.RIGHT, padx=5)
-                    break
         elif self.current_table_type == 'image':
-            for btn_name in ['delete_image', 'run', 'stop_using']:
+            for btn_name in ['delete_image', 'run', 'stop_using', 'tag_image',
+                             'save_image', 'inspect_image', 'history_image']:
                 if btn_name in self.action_buttons and self.action_buttons[btn_name].winfo_exists():
                     self.action_buttons[btn_name].pack(side=tk.LEFT, padx=2)
         elif self.current_table_type == 'volume':
-            if 'delete_volume' in self.action_buttons and self.action_buttons['delete_volume'].winfo_exists():
-                self.action_buttons['delete_volume'].pack(side=tk.LEFT, padx=2)
+            for btn_name in ['delete_volume', 'inspect_volume']:
+                if btn_name in self.action_buttons and self.action_buttons[btn_name].winfo_exists():
+                    self.action_buttons[btn_name].pack(side=tk.LEFT, padx=2)
+        elif self.current_table_type == 'network':
+            for btn_name in ['delete_network', 'inspect_network', 'connect_network', 'disconnect_network']:
+                if btn_name in self.action_buttons and self.action_buttons[btn_name].winfo_exists():
+                    self.action_buttons[btn_name].pack(side=tk.LEFT, padx=2)
+        elif self.current_table_type == 'compose':
+            for btn_name in ['compose_up', 'compose_down', 'compose_restart',
+                             'compose_logs', 'compose_services', 'compose_inspect']:
+                if btn_name in self.action_buttons and self.action_buttons[btn_name].winfo_exists():
+                    self.action_buttons[btn_name].pack(side=tk.LEFT, padx=2)
     
     def show_table(self, columns, rows, table_type=None, table_title=None, append=False):
         """Show tabular data in Treeview"""
         # Cancel any running operations when starting a new view
         if not append:
-            self.cancel_running_operations()
+            if table_type == 'container_stats' and self.live_stats_enabled:
+                cancel_current_operation()
+            else:
+                self.cancel_running_operations()
         
         self.current_table_type = table_type
         
@@ -115,7 +145,7 @@ class DisplayManager:
             self.all_tables_data = []
             
             # Add search bar for Docker categories
-            if table_type in ['container', 'image', 'volume']:
+            if table_type in ['container', 'image', 'volume', 'network', 'compose', 'compose_service']:
                 search_frame = ttk.Frame(self.output_container)
                 search_frame.pack(fill=tk.X, padx=10, pady=(5, 5))
                 
@@ -136,7 +166,9 @@ class DisplayManager:
                           foreground="#0066cc").pack(side=tk.LEFT, anchor=tk.W)
 
                 _noun = {'container': 'container', 'container_stats': 'container',
-                         'image': 'image', 'volume': 'volume'}.get(table_type, 'item')
+                         'image': 'image', 'volume': 'volume',
+                         'network': 'network', 'compose': 'project',
+                         'compose_service': 'service'}.get(table_type, 'item')
                 _count = len(rows)
                 _badge_text = f"  {_count} {_noun}{'s' if _count != 1 else ''}  "
                 tk.Label(title_frame, text=_badge_text,

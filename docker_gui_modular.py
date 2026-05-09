@@ -9,6 +9,7 @@ This is the refactored main entry point following DRY and SOC patterns.
 import sys
 import os
 import glob
+import webbrowser
 
 # Prefer venv packages so ttkbootstrap uses the correct Pillow version
 _venv_pkgs = glob.glob(
@@ -31,6 +32,14 @@ from src.config.config_tooltips import (
     SIDEBAR_BOTTOM_TOOLTIPS,
 )
 from src.help.help_commands import commands_info
+from src.help.help_creator import (
+    CREATOR_GITHUB_LABEL,
+    CREATOR_GITHUB_URL,
+    CREATOR_NAME,
+    CREATOR_PORTFOLIO_LABEL,
+    CREATOR_PORTFOLIO_URL,
+    CREATOR_ROLE,
+)
 from src.help.help_info import help_info
 from src.config.config_menu import get_menu_structure
 
@@ -65,7 +74,9 @@ from src.docker.docker_actions import (
     restart_all_containers,
     delete_all_containers,
     delete_all_images,
+    prune_images,
     prune_volumes,
+    prune_networks,
     delete_used_volumes,
     delete_all_volumes
 )
@@ -73,17 +84,28 @@ from src.docker.docker_tables import (
     show_running_containers,
     show_all_containers,
     show_stopped_containers,
+    show_paused_containers,
     show_containers_with_stats,
     show_images,
     show_unused_images,
     show_used_images,
     show_volumes,
-    show_docker_disk_storage_simple
+    show_used_volumes,
+    show_unused_volumes,
+    show_docker_disk_storage_simple,
+    show_networks,
+    show_compose_projects
 )
 
 # Import dialogs and specific features
 from src.docker.docker_gui_features import (
     pull_image_dialog,
+    build_image_dialog,
+    reopen_latest_build_status_window,
+    load_image_dialog,
+    create_volume_dialog,
+    create_network_dialog,
+    compose_up_from_file_dialog,
     open_container_terminal_dialog,
     view_container_logs_dialog,
     docker_disk_usage_view,
@@ -120,7 +142,6 @@ class DockerGUI:
         
         # References to manually themed widgets (updated on theme change)
         self.sidebar = None
-        self.header_frame = None
         
         # State variables
         self.docker_status_var = tk.StringVar()
@@ -203,44 +224,15 @@ class DockerGUI:
     
     def create_widgets(self):
         """Create all UI widgets"""
-        # Header bar
-        self.create_header(self.root)
-        
-        # Main container below header
+        # Main container fills the whole window
         main_container = ttk.Frame(self.root)
         main_container.pack(fill=tk.BOTH, expand=True)
-        
+
         # Create sidebar
         self.create_sidebar(main_container)
-        
+
         # Create main content area
         self.create_main_content(main_container)
-    
-    def create_header(self, parent):
-        """Create top header bar with app branding"""
-        theme = themes[self.current_theme]
-        self.header_frame = tk.Frame(parent, bg=theme["header_bg"], height=48)
-        self.header_frame.pack(fill=tk.X, side=tk.TOP)
-        self.header_frame.pack_propagate(False)
-        
-        # Docker whale logo + title
-        tk.Label(
-            self.header_frame,
-            text="🐳  Docker Control Panel",
-            bg=theme["header_bg"],
-            fg="white",
-            font=("JetBrains Mono", 14, "bold")
-        ).pack(side=tk.LEFT, padx=16, pady=10)
-        
-        # Docker status badge on the right
-        self.header_status_label = tk.Label(
-            self.header_frame,
-            textvariable=self.docker_status_var,
-            bg=theme["header_bg"],
-            fg="#aaaaaa",
-            font=("JetBrains Mono", 9)
-        )
-        self.header_status_label.pack(side=tk.RIGHT, padx=16, pady=10)
     
     def create_sidebar(self, parent):
         """Create left sidebar with menu"""
@@ -250,15 +242,24 @@ class DockerGUI:
         self.sidebar.pack_propagate(False)
         sidebar = self.sidebar
         
-        # Sidebar title
+        # App title in sidebar
         tk.Label(
-            sidebar, text="Navigation",
-            bg=theme["sidebar_bg"], fg="#888888",
-            font=("Arial", 8, "bold")
+            sidebar, text="🐳 Docker Control Panel",
+            bg=theme["sidebar_bg"], fg="#4ea8f7",
+            font=("Arial", 10, "bold")
         ).pack(pady=(14, 2), padx=14, anchor=tk.W)
-        
+
+        # Docker status badge
+        self.sidebar_status_label = tk.Label(
+            sidebar,
+            textvariable=self.docker_status_var,
+            bg=theme["sidebar_bg"], fg="#888888",
+            font=("Arial", 8),
+        )
+        self.sidebar_status_label.pack(padx=14, pady=(0, 6), anchor=tk.W)
+
         # Thin separator line
-        tk.Frame(sidebar, bg="#333355", height=1).pack(fill=tk.X, padx=14, pady=(4, 8))
+        tk.Frame(sidebar, bg="#333355", height=1).pack(fill=tk.X, padx=14, pady=(0, 8))
         
         # Menu structure
         menu_structure = get_menu_structure(
@@ -272,6 +273,7 @@ class DockerGUI:
             lambda: show_all_containers(self.display_manager.show_table, self.show_loading),
             lambda: show_running_containers(self.display_manager.show_table, self.show_loading),
             lambda: show_stopped_containers(self.display_manager.show_table, self.show_loading),
+            lambda: show_paused_containers(self.display_manager.show_table, self.show_loading),
             lambda: start_all_containers(self.display_manager.show_text_output, self.show_loading),
             lambda: stop_all_containers(self.display_manager.show_text_output, self.show_loading),
             lambda: restart_all_containers(self.display_manager.show_text_output, self.show_loading),
@@ -280,11 +282,44 @@ class DockerGUI:
             lambda: show_used_images(self.display_manager.show_table, self.show_loading),
             lambda: show_unused_images(self.display_manager.show_table, self.show_loading),
             lambda: pull_image_dialog(self.root, lambda: show_images(self.display_manager.show_table, self.show_loading)),
+            lambda: build_image_dialog(
+                self.root,
+                self.display_manager.show_text_output,
+                lambda: show_images(self.display_manager.show_table, self.show_loading),
+            ),
+            lambda: reopen_latest_build_status_window(self.root),
+            lambda: load_image_dialog(
+                self.root,
+                self.display_manager.show_text_output,
+                lambda: show_images(self.display_manager.show_table, self.show_loading),
+            ),
+            lambda: prune_images(self.display_manager.show_text_output, self.root, self.show_loading),
             lambda: delete_all_images(self.display_manager.show_text_output, self.root, self.show_loading),
             lambda: show_volumes(self.display_manager.show_table, self.show_loading),
+            lambda: show_used_volumes(self.display_manager.show_table, self.show_loading),
+            lambda: show_unused_volumes(self.display_manager.show_table, self.show_loading),
+            lambda: create_volume_dialog(
+                self.root,
+                self.display_manager.show_text_output,
+                lambda: show_volumes(self.display_manager.show_table, self.show_loading),
+            ),
             lambda: prune_volumes(self.display_manager.show_text_output, self.root, self.show_loading),
             lambda: delete_used_volumes(self.display_manager.show_text_output, self.root, self.show_loading),
             lambda: delete_all_volumes(self.display_manager.show_text_output, self.root, self.show_loading),
+            lambda: show_networks(self.display_manager.show_table, self.show_loading),
+            lambda: create_network_dialog(
+                self.root,
+                self.display_manager.show_text_output,
+                lambda: show_networks(self.display_manager.show_table, self.show_loading),
+            ),
+            lambda: prune_networks(self.display_manager.show_text_output, self.root, self.show_loading),
+            lambda: show_compose_projects(self.display_manager.show_table, self.show_loading),
+            lambda: compose_up_from_file_dialog(
+                self.root,
+                self.display_manager.show_text_output,
+                lambda: show_compose_projects(self.display_manager.show_table, self.show_loading),
+                self.show_loading,
+            ),
             lambda: show_containers_with_stats(self.display_manager.show_table, self.show_loading, self.display_manager),
             lambda: docker_disk_usage_view(self.display_manager.output_container, self.show_loading),
             lambda: show_docker_disk_storage_simple(self.display_manager.show_table, self.show_loading)
@@ -293,7 +328,15 @@ class DockerGUI:
         self.menu_structure = menu_structure
         
         # Create sidebar menu buttons
-        icons = {"Docker": "🐳", "Containers": "📦", "Images": "🖼", "Volumes": "💾", "Stats": "📊"}
+        icons = {
+            "Docker": "🐳",
+            "Containers": "📦",
+            "Images": "🖼",
+            "Volumes": "💾",
+            "Networks": "🕸",
+            "Compose": "🧩",
+            "Stats": "📊",
+        }
         for category in menu_structure.keys():
             icon = icons.get(category, "•")
             btn = ttk.Button(
@@ -369,7 +412,10 @@ class DockerGUI:
         # Action toolbar frame
         self.btn_frame = ttk.LabelFrame(main_frame, text="Select a category from the sidebar", padding=(10, 8))
         self.btn_frame.pack(fill=tk.X, pady=(0, 6))
-        
+
+        # Docker info panel (shown only when Docker category is active)
+        self._docker_info_panel = self._create_docker_info_panel(main_frame)
+
         # Content area with output and help
         content_area = ttk.Frame(main_frame)
         content_area.pack(fill=tk.BOTH, expand=True)
@@ -397,15 +443,212 @@ class DockerGUI:
         setup_text_context_menu(text_widget, self.root)
         setup_table_context_menu(table_widget, self.root)
     
+    def _create_docker_info_panel(self, parent):
+        """Create app-description banner shown below the toolbar when Docker is active."""
+        panel = tk.Frame(parent, bg="#0d1117", relief="flat", bd=0)
+
+        # Left column: whale + title + tagline
+        left = tk.Frame(panel, bg="#0d1117")
+        left.pack(side=tk.LEFT, padx=(14, 24), pady=10)
+
+        tk.Label(
+            left, text="🐳  Docker Control Panel",
+            font=("JetBrains Mono", 12, "bold"),
+            bg="#0d1117", fg="#4ea8f7",
+        ).pack(anchor=tk.W)
+        tk.Label(
+            left, text="A graphical Docker manager for Linux",
+            font=("Arial", 9), bg="#0d1117", fg="#6e7f92",
+        ).pack(anchor=tk.W, pady=(2, 0))
+
+        # Vertical divider
+        tk.Frame(panel, bg="#1e2d3d", width=1).pack(side=tk.LEFT, fill=tk.Y, pady=6)
+
+        # Centre column: feature chips
+        centre = tk.Frame(panel, bg="#0d1117")
+        centre.pack(side=tk.LEFT, padx=20, pady=10)
+
+        tk.Label(
+            centre, text="Features",
+            font=("Arial", 8, "bold"), bg="#0d1117", fg="#6e7f92",
+        ).pack(anchor=tk.W)
+
+        chips_row = tk.Frame(centre, bg="#0d1117")
+        chips_row.pack(anchor=tk.W, pady=(4, 0))
+
+        _FEATURES = [
+            ("📦 Containers", "#1a4a6b"),
+            ("🖼 Images",      "#1a4a2b"),
+            ("💾 Volumes",     "#4a3a1a"),
+            ("🕸 Networks",    "#3a1a4a"),
+            ("🧩 Compose",     "#1a3a4a"),
+            ("📊 Stats",       "#4a1a1a"),
+        ]
+        for label, bg in _FEATURES:
+            tk.Label(
+                chips_row, text=f" {label} ",
+                font=("Arial", 8, "bold"),
+                bg=bg, fg="#c0d8f0",
+                relief="flat", padx=4, pady=3,
+            ).pack(side=tk.LEFT, padx=(0, 6))
+
+        # Vertical divider
+        tk.Frame(panel, bg="#1e2d3d", width=1).pack(side=tk.LEFT, fill=tk.Y, pady=6)
+
+        # Right column: quick tips
+        right = tk.Frame(panel, bg="#0d1117")
+        right.pack(side=tk.LEFT, padx=20, pady=10)
+
+        tk.Label(
+            right, text="Quick Tips",
+            font=("Arial", 8, "bold"), bg="#0d1117", fg="#6e7f92",
+        ).pack(anchor=tk.W)
+
+        _TIPS = [
+            "• Click a sidebar category to explore Docker resources",
+            "• Select a row in the table, then use the action buttons below",
+            "• Right-click any table row for a context menu",
+        ]
+        for tip in _TIPS:
+            tk.Label(
+                right, text=tip,
+                font=("Arial", 8), bg="#0d1117", fg="#8a9fb5",
+                anchor=tk.W, justify=tk.LEFT,
+            ).pack(anchor=tk.W, pady=1)
+
+        # Panel starts hidden; show_category_buttons controls visibility
+        return panel
+
     def create_help_panel(self, parent):
         """Create help panel with tabs"""
         theme = themes[self.current_theme]
+        link_color = theme.get("link_fg", theme["text_fg"])
         help_panel = ttk.Frame(parent, width=300)
         help_panel.pack_propagate(False)
         
         help_notebook = ttk.Notebook(help_panel)
         help_notebook.pack(fill=tk.BOTH, expand=True)
         help_notebook.enable_traversal()
+
+        # Creator tab
+        creator_tab = ttk.Frame(help_notebook)
+        help_notebook.add(creator_tab, text=" Creator ")
+        creator_content = tk.Frame(
+            creator_tab,
+            bg=theme["text_bg"],
+            padx=14,
+            pady=12
+        )
+        creator_content.pack(fill=tk.BOTH, expand=True)
+
+        creator_title = tk.Label(
+            creator_content,
+            text="ABOUT THE CREATOR",
+            font=("Arial", 11, "bold"),
+            bg=theme["text_bg"],
+            fg=theme["text_fg"],
+            anchor="w",
+            justify=tk.LEFT
+        )
+        creator_title.pack(fill=tk.X, pady=(0, 12))
+
+        creator_name = tk.Label(
+            creator_content,
+            text=CREATOR_NAME,
+            font=("Arial", 11, "bold"),
+            bg=theme["text_bg"],
+            fg=theme["text_fg"],
+            anchor="w",
+            justify=tk.LEFT
+        )
+        creator_name.pack(fill=tk.X)
+
+        creator_role = tk.Label(
+            creator_content,
+            text=CREATOR_ROLE,
+            font=("Arial", 10),
+            bg=theme["text_bg"],
+            fg=theme["text_fg"],
+            anchor="w",
+            justify=tk.LEFT
+        )
+        creator_role.pack(fill=tk.X, pady=(0, 12))
+
+        portfolio_label = tk.Label(
+            creator_content,
+            text="Portfolio",
+            font=("Arial", 10, "bold"),
+            bg=theme["text_bg"],
+            fg=theme["text_fg"],
+            anchor="w",
+            justify=tk.LEFT
+        )
+        portfolio_label.pack(fill=tk.X)
+
+        portfolio_link = tk.Label(
+            creator_content,
+            text=CREATOR_PORTFOLIO_LABEL,
+            font=("JetBrains Mono", 9, "underline"),
+            bg=theme["text_bg"],
+            fg=link_color,
+            anchor="w",
+            justify=tk.LEFT,
+            cursor="hand2"
+        )
+        portfolio_link.pack(fill=tk.X, pady=(0, 12))
+        portfolio_link.bind(
+            "<Button-1>",
+            lambda _event: self.open_external_link(CREATOR_PORTFOLIO_URL)
+        )
+
+        github_label = tk.Label(
+            creator_content,
+            text="GitHub",
+            font=("Arial", 10, "bold"),
+            bg=theme["text_bg"],
+            fg=theme["text_fg"],
+            anchor="w",
+            justify=tk.LEFT
+        )
+        github_label.pack(fill=tk.X)
+
+        github_link = tk.Label(
+            creator_content,
+            text=CREATOR_GITHUB_LABEL,
+            font=("JetBrains Mono", 9, "underline"),
+            bg=theme["text_bg"],
+            fg=link_color,
+            anchor="w",
+            justify=tk.LEFT,
+            cursor="hand2"
+        )
+        github_link.pack(fill=tk.X)
+        github_link.bind(
+            "<Button-1>",
+            lambda _event: self.open_external_link(CREATOR_GITHUB_URL)
+        )
+
+        creator_note = tk.Label(
+            creator_content,
+            text="Click a link to open it in your browser.",
+            font=("Arial", 9),
+            bg=theme["text_bg"],
+            fg=theme["text_fg"],
+            anchor="w",
+            justify=tk.LEFT
+        )
+        creator_note.pack(fill=tk.X, pady=(12, 0))
+
+        self._creator_frame = creator_content
+        self._creator_text_labels = [
+            creator_title,
+            creator_name,
+            creator_role,
+            portfolio_label,
+            github_label,
+            creator_note,
+        ]
+        self._creator_link_labels = [portfolio_link, github_link]
         
         # Commands tab
         commands_tab = ttk.Frame(help_notebook)
@@ -423,7 +666,7 @@ class DockerGUI:
         commands_text.insert("1.0", commands_info)
         commands_text.config(state=tk.DISABLED)
         self._help_cmd_text = commands_text
-        
+
         # Help tab
         help_tab = ttk.Frame(help_notebook)
         help_notebook.add(help_tab, text=" Help ")
@@ -442,6 +685,13 @@ class DockerGUI:
         self._help_text = help_text
         
         return help_panel
+
+    def open_external_link(self, url):
+        """Open an external link in the default browser."""
+        try:
+            webbrowser.open_new_tab(url)
+        except Exception:
+            messagebox.showerror("Open Link", f"Could not open link:\n{url}")
     
     def create_text_widget(self, parent):
         """Create text output widget"""
@@ -491,7 +741,8 @@ class DockerGUI:
         """Setup action buttons for selected items"""
         action_buttons, action_label = create_selected_item_actions(
             action_frame, self.root, self.display_manager,
-            lambda: show_images(self.display_manager.show_table, self.show_loading)
+            lambda: show_images(self.display_manager.show_table, self.show_loading),
+            self.show_loading,
         )
         self.display_manager.set_action_buttons(action_buttons, action_label)
     
@@ -571,6 +822,7 @@ class DockerGUI:
 
         self.current_theme = theme_name
         theme = themes[theme_name]
+        link_color = theme.get("link_fg", theme["text_fg"])
         self.theme_var.set(theme_name)
         
         # Switch ttkbootstrap theme (updates all ttk widgets automatically)
@@ -579,12 +831,6 @@ class DockerGUI:
         # Update manually-coloured tk widgets
         self.root.configure(bg=theme["root_bg"])
         
-        if self.header_frame and self.header_frame.winfo_exists():
-            self.header_frame.configure(bg=theme["header_bg"])
-            for child in self.header_frame.winfo_children():
-                if isinstance(child, tk.Label):
-                    child.configure(bg=theme["header_bg"])
-        
         if self.sidebar and self.sidebar.winfo_exists():
             self.sidebar.configure(bg=theme["sidebar_bg"])
             for child in self.sidebar.winfo_children():
@@ -592,6 +838,8 @@ class DockerGUI:
                     child.configure(bg=theme["sidebar_bg"])
                 elif isinstance(child, tk.Label):
                     child.configure(bg=theme["sidebar_bg"])
+        if hasattr(self, 'sidebar_status_label') and self.sidebar_status_label.winfo_exists():
+            self.sidebar_status_label.configure(bg=theme["sidebar_bg"])
         
         self.display_manager.text_widget.configure(
             bg=theme["text_bg"], fg=theme["text_fg"],
@@ -603,6 +851,16 @@ class DockerGUI:
             self._help_cmd_text.configure(bg=theme["text_bg"], fg=theme["text_fg"])
         if hasattr(self, '_help_text') and self._help_text.winfo_exists():
             self._help_text.configure(bg=theme["text_bg"], fg=theme["text_fg"])
+        if hasattr(self, '_creator_frame') and self._creator_frame.winfo_exists():
+            self._creator_frame.configure(bg=theme["text_bg"])
+        if hasattr(self, '_creator_text_labels'):
+            for label in self._creator_text_labels:
+                if label.winfo_exists():
+                    label.configure(bg=theme["text_bg"], fg=theme["text_fg"])
+        if hasattr(self, '_creator_link_labels'):
+            for label in self._creator_link_labels:
+                if label.winfo_exists():
+                    label.configure(bg=theme["text_bg"], fg=link_color)
         
         # Update treeview alternating rows
         tw = self.display_manager.table_widget
@@ -660,6 +918,11 @@ class DockerGUI:
         self.help_panel.pack_forget()
         if category == "Docker":
             self.help_panel.pack(side=tk.RIGHT, fill=tk.Y, padx=(8, 0))
+
+        # Show/hide Docker info panel
+        self._docker_info_panel.pack_forget()
+        if category == "Docker":
+            self._docker_info_panel.pack(fill=tk.X, pady=(0, 6))
         
         # Update label
         self.btn_frame.config(text=f"{category} - Actions")

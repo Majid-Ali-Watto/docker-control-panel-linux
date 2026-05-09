@@ -1,52 +1,154 @@
 """
-Application help text
+Application help text shown in the Help tab.
 """
 
 help_info = """
-DOCKER CONTROL PANEL HELP
+╔══════════════════════════════════════════════════╗
+║       DOCKER CONTROL PANEL — HELP GUIDE          ║
+╚══════════════════════════════════════════════════╝
 
-DOCKER SECTION:
-• Start: Start Docker service
-• Stop: Stop Docker service
-• Restart: Restart Docker service
-• Clean All: Remove all containers, images, and volumes
+── GETTING STARTED ──────────────────────────────────
 
-CONTAINERS SECTION:
-• All: Show all containers
-• Running: Show only running containers
-• Stopped: Show only stopped containers
-• Start All: Start all containers
-• Stop All: Stop all containers
-• Restart All: Restart all containers
-• Delete All: Remove all containers
+  1. Launch the app and enter your sudo password
+     (it is stored securely in ~/.docker-gui/ with
+     0600 permissions — only you can read it).
+  2. The sidebar shows the Docker service status
+     (Running ✅ or Stopped ❌) at the top.
+  3. Click a sidebar category to explore resources.
 
-IMAGES SECTION:
-• All: Show all images
-• Used: Show images used by containers
-• Unused: Show images not used by any container
-• Pull Image: Download image from Docker Hub
-• Delete All: Remove all images
+── SIDEBAR CATEGORIES ───────────────────────────────
 
-VOLUMES SECTION:
-• Volumes: List all volumes
-• Prune Volumes: Remove unused volumes
+  🐳 Docker
+    Control the Docker service and perform bulk
+    cleanup. The info panel below the toolbar
+    shows app features and quick tips.
 
-STATS SECTION:
-• Container Stats: Show real-time container resource usage
-• Docker Disk Usage: Show detailed disk usage by containers, images, volumes
+  📦 Containers
+    View all, running, stopped, or paused
+    containers. Perform bulk start/stop/restart/
+    delete across all containers.
 
-FEATURES:
-• Search: Filter tables by typing in search bar
-• Right-click: Copy specific values or entire rows
-• Select multiple: Hold Ctrl/Shift to select multiple items
-• Theme: Change app appearance from sidebar
+  🖼 Images
+    View all, used, or unused images. Pull from
+    Docker Hub, build from Dockerfile, load from
+    archive, prune dangling layers, or delete all.
 
-TABLE ACTIONS:
-Select items from table and use action buttons:
-• Start Container: Start selected containers
-• Stop Container: Stop selected containers
-• Delete Container: Remove selected containers
-• Delete Image: Remove selected images
-• Run Container: Create container from selected image
-• Delete Volume: Remove selected volumes
+  💾 Volumes
+    View all, used, or unused volumes. Create new
+    volumes or prune unused ones.
+
+  🕸 Networks
+    View all networks. Create new networks or prune
+    unused ones.
+
+  🧩 Compose
+    View active Compose projects. Start a project
+    from a docker-compose.yml file.
+
+  📊 Stats
+    Live container resource usage (CPU, memory,
+    network I/O, block I/O). Also view detailed
+    Docker disk usage.
+
+── TABLE ACTIONS ────────────────────────────────────
+
+  Select one or more rows in any table, then use
+  the action buttons that appear below the table.
+
+  Containers:
+    Start · Stop · Restart · Pause · Unpause
+    Rename · Delete · Terminal · Logs
+    Inspect · Commit
+
+  Images:
+    Run · Tag · Save · Inspect · History
+    Stop Using · Delete
+
+  Volumes:
+    Inspect · Delete
+
+  Networks:
+    Connect · Disconnect · Inspect · Delete
+
+  Compose projects:
+    Up · Down · Restart · Logs · Services · Config
+
+── SEARCH & FILTER ──────────────────────────────────
+
+  A search bar appears above every table. Type any
+  keyword to filter rows across all visible columns
+  in real time. Clear the field to restore all rows.
+
+── CONTEXT MENU ─────────────────────────────────────
+
+  Right-click any table row or text area for a
+  context menu with copy options:
+  • Copy a specific cell value
+  • Copy the entire row as text
+
+── CONTAINER TERMINAL ───────────────────────────────
+
+  Select a container and click Terminal. A system
+  terminal emulator will open with an interactive
+  shell (bash/sh) inside that container.
+
+  Supported emulators (auto-detected):
+    tilix, gnome-terminal, xfce4-terminal,
+    konsole, mate-terminal, terminator, xterm
+
+── CONTAINER LOGS ───────────────────────────────────
+
+  Select a container and click Logs to open the
+  log viewer. Use the Follow toggle to tail logs
+  live. Scroll up to review earlier output.
+
+── IMAGE RUN DIALOG ─────────────────────────────────
+
+  Select an image and click Run to launch a
+  container with full options:
+  • Container name
+  • Port mappings  (host:container)
+  • Environment variables  (KEY=value)
+  • Volume mounts  (host_path:container_path)
+  • Network selection
+  • Restart policy  (no / always / on-failure)
+
+── THEMES ───────────────────────────────────────────
+
+  Choose a theme from the dropdown at the bottom
+  of the sidebar. Your selection is persisted and
+  restored on next launch.
+
+  Available themes:
+    Default · Dark · Light Alt · Classic · Clam Light
+
+── PASSWORD MANAGEMENT ──────────────────────────────
+
+  Change  — update the stored sudo password
+  Delete  — remove the saved password (you will
+             be prompted again on next launch)
+
+── KEYBOARD SHORTCUTS ───────────────────────────────
+
+  Tab / Shift-Tab   Move focus between controls
+  Enter / Space     Activate focused button
+  Ctrl →            Move focus to the main toolbar
+  Ctrl ←            Move focus back to the sidebar
+  Ctrl-C            Copy selected text (text areas)
+
+── DISK USAGE VIEW ──────────────────────────────────
+
+  Stats → Docker Disk Usage shows a detailed
+  breakdown: image layers, container filesystems,
+  and volumes — matching `docker system df -v`.
+
+── SECURITY NOTES ───────────────────────────────────
+
+  • Sudo password is stored at:
+      ~/.docker-gui/config.json  (chmod 0600)
+  • Only the current user can read the file.
+  • The password is never logged or printed.
+  • All docker commands use fixed constant strings
+    — user input is never interpolated into shell
+    commands, preventing injection attacks.
 """

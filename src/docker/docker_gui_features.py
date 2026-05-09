@@ -7,16 +7,294 @@ import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
 import threading
 import subprocess
+import shlex
 from src.utils.utils import run_cmd, async_run, parse_fixed_width_table, clean_subprocess_env
 from src.config.config_manager import get_sudo_password
 from src.config.config_tooltips import ACTION_TOOLTIPS
 from src.docker.docker_actions import check_docker_running
 from src.ui.ui_components import create_table_widget, Tooltip
 from src.utils.threads import startThreadForTask
+from src.docker.docker_operations import run_docker_cmd, stream_docker_cmd, cancel_stream
 from src.docker.docker_commands_constants import (
     DOCKER_PULL, DOCKER_RUN_DETACHED, DOCKER_INSPECT_ANCESTOR,
-    DOCKER_DISK_USAGE_VERBOSE
+    DOCKER_DISK_USAGE_VERBOSE, DOCKER_NETWORK_NAMES, DOCKER_IMAGE_BUILD,
+    DOCKER_IMAGE_LOAD, DOCKER_VOLUME_CREATE, DOCKER_NETWORK_CREATE,
+    DOCKER_COMPOSE_UP
 )
+
+
+def _quote(value):
+    return shlex.quote(str(value))
+
+
+def _split_csv_lines(raw_text):
+    values = []
+    for line in str(raw_text).splitlines():
+        for part in line.split(','):
+            part = part.strip()
+            if part:
+                values.append(part)
+    return values
+
+
+def _join_flag_values(flag, values):
+    return ''.join(f" {flag} {_quote(value)}" for value in values if str(value).strip())
+
+
+def _join_quoted(values):
+    return ' '.join(_quote(value) for value in values if str(value).strip())
+
+
+def _compose_files_to_args(config_files):
+    files = _split_csv_lines(config_files)
+    return ' '.join(f"-f {_quote(path)}" for path in files)
+
+
+def _center_dialog(dialog, min_width=420):
+    dialog.update_idletasks()
+    width = max(dialog.winfo_reqwidth() + 20, min_width)
+    height = dialog.winfo_reqheight() + 16
+    x = (dialog.winfo_screenwidth() - width) // 2
+    y = (dialog.winfo_screenheight() - height) // 2
+    dialog.geometry(f"{width}x{height}+{x}+{y}")
+
+
+_ERROR_HINTS = (
+    "error", "failed", "conflict", "permission denied",
+    "empty compose file", "not found", "no such",
+)
+
+def _make_output_callback(show_text_output_callback, title="", refresh_callback=None, root=None):
+    def callback(result):
+        text = f"{title}\n\n{result}".strip() if title else result
+        show_text_output_callback(text)
+        if refresh_callback and root:
+            result_lower = result.lower()
+            has_error = any(hint in result_lower for hint in _ERROR_HINTS)
+            if not has_error:
+                root.after(800, refresh_callback)
+    return callback
+
+
+_LATEST_BUILD_SESSION = None
+
+
+def _session_status_text(session):
+    if session.get('status') == 'running':
+        return "Running..."
+    if session.get('status') == 'cancelling':
+        return "Cancelling..."
+    if session.get('status') == 'cancelled':
+        return "Cancelled"
+    if session.get('status') == 'completed':
+        return "Completed successfully"
+    if session.get('status') == 'warning':
+        return "Completed, but image was not found"
+    if session.get('status') == 'failed':
+        return f"Failed (exit code {session.get('return_code')})"
+    return "Starting..."
+
+
+def _refresh_stream_window(session):
+    """Sync session state into its current window, if open."""
+    window = session.get('window')
+    if not window or not window.winfo_exists():
+        return
+
+    session['status_var'].set(_session_status_text(session))
+    output_text = session['output_text']
+    output_text.config(state=tk.NORMAL)
+    output_text.delete("1.0", tk.END)
+    output_text.insert(tk.END, ''.join(session['output_lines']))
+    output_text.see(tk.END)
+    output_text.config(state=tk.DISABLED)
+
+    cancel_btn = session['cancel_btn']
+    if session.get('status') in ('running', 'cancelling'):
+        cancel_btn.config(state=tk.NORMAL if session.get('status') == 'running' else tk.DISABLED)
+    else:
+        cancel_btn.config(state=tk.DISABLED)
+
+
+def _close_stream_window(session):
+    """Close the current stream window without cancelling the session."""
+    window = session.get('window')
+    if window and window.winfo_exists():
+        window.destroy()
+    session['window'] = None
+
+
+def _show_stream_session_window(root, session):
+    """Open or reopen a non-modal window for a tracked stream session."""
+    existing = session.get('window')
+    if existing and existing.winfo_exists():
+        existing.lift()
+        existing.focus_force()
+        return existing
+
+    window = tk.Toplevel(root)
+    window.title(session['title'])
+    window.geometry("980x620")
+
+    header = ttk.Frame(window)
+    header.pack(fill=tk.X, padx=10, pady=(10, 6))
+
+    ttk.Label(header, text=session['title'], font=("Arial", 11, "bold")).pack(side=tk.LEFT)
+    status_var = tk.StringVar(value=_session_status_text(session))
+    ttk.Label(header, textvariable=status_var, font=("Arial", 9)).pack(side=tk.RIGHT)
+
+    command_frame = ttk.LabelFrame(window, text="Command", padding=6)
+    command_frame.pack(fill=tk.X, padx=10, pady=(0, 6))
+
+    command_text = tk.Text(
+        command_frame,
+        height=2,
+        wrap=tk.WORD,
+        font=("JetBrains Mono", 9),
+        bg="#20242b",
+        fg="#d4d4d4",
+        relief=tk.FLAT,
+    )
+    command_text.pack(fill=tk.X)
+    command_text.insert("1.0", session['command'])
+    command_text.config(state=tk.DISABLED)
+
+    output_frame = ttk.Frame(window)
+    output_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=(0, 8))
+
+    output_text = tk.Text(
+        output_frame,
+        wrap=tk.NONE,
+        font=("JetBrains Mono", 9),
+        bg="#1e1e1e",
+        fg="#d4d4d4",
+        insertbackground="#d4d4d4",
+    )
+    output_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+
+    scroll_y = ttk.Scrollbar(output_frame, orient=tk.VERTICAL, command=output_text.yview)
+    scroll_y.pack(side=tk.RIGHT, fill=tk.Y)
+    scroll_x = ttk.Scrollbar(output_frame, orient=tk.HORIZONTAL, command=output_text.xview)
+    scroll_x.pack(side=tk.BOTTOM, fill=tk.X)
+    output_text.configure(yscrollcommand=scroll_y.set, xscrollcommand=scroll_x.set)
+
+    footer = ttk.Frame(window)
+    footer.pack(fill=tk.X, padx=10, pady=(0, 10))
+
+    cancel_btn = ttk.Button(footer, text="Cancel Build", width=14)
+    cancel_btn.pack(side=tk.RIGHT, padx=(0, 12))
+    close_btn = ttk.Button(footer, text="Close", width=12)
+    close_btn.pack(side=tk.RIGHT, padx=(0, 12))
+
+    def on_cancel():
+        if session.get('status') != 'running' or not session.get('controller'):
+            return
+
+        cancelled = cancel_stream(session['controller'])
+        if cancelled:
+            session['status'] = 'cancelling'
+            _refresh_stream_window(session)
+
+    close_btn.config(command=lambda: _close_stream_window(session))
+
+    cancel_btn.config(command=on_cancel)
+    window.protocol("WM_DELETE_WINDOW", lambda: _close_stream_window(session))
+
+    session['window'] = window
+    session['status_var'] = status_var
+    session['output_text'] = output_text
+    session['cancel_btn'] = cancel_btn
+    _refresh_stream_window(session)
+
+    return window
+
+
+def _verify_built_image_tag(tag, sudo_password=None):
+    """Verify that a tagged image exists after build completion."""
+    result = run_cmd(f"docker image inspect {_quote(tag)}", sudo=True, sudo_password=sudo_password)
+    if result.lstrip().startswith('['):
+        return True, f"\nVerified image tag: {tag}\n"
+    return False, (
+        f"\nBuild command finished, but the image tag '{tag}' was not found in Docker images.\n"
+        "Check the build output above and confirm the tag/value used for the build.\n"
+    )
+
+
+def _start_stream_session(root, title, command, sudo=False, sudo_password=None, on_success=None, success_validator=None):
+    """Create and start a tracked stream session."""
+    session = {
+        'root': root,
+        'title': title,
+        'command': command,
+        'sudo': sudo,
+        'sudo_password': sudo_password,
+        'on_success': on_success,
+        'status': 'running',
+        'return_code': None,
+        'controller': None,
+        'output_lines': [],
+        'window': None,
+        'status_var': None,
+        'output_text': None,
+        'cancel_btn': None,
+    }
+
+    def append_output(line):
+        session['output_lines'].append(line)
+        _refresh_stream_window(session)
+
+    def mark_complete(full_output, return_code, was_cancelled):
+        session['return_code'] = return_code
+        if was_cancelled:
+            session['status'] = 'cancelled'
+            if not full_output.strip():
+                session['output_lines'].append("\nBuild cancelled by user.\n")
+        elif return_code == 0:
+            validation_ok = True
+            validation_message = ""
+            if success_validator:
+                validation_ok, validation_message = success_validator()
+                if validation_message:
+                    session['output_lines'].append(validation_message)
+
+            if validation_ok:
+                session['status'] = 'completed'
+                if not full_output.strip():
+                    session['output_lines'].append("Build completed successfully.\n")
+                if session.get('on_success'):
+                    session['on_success']()
+            else:
+                session['status'] = 'warning'
+                if not full_output.strip() and not validation_message:
+                    session['output_lines'].append("Build finished, but the expected image was not found.\n")
+        else:
+            session['status'] = 'failed'
+            if not full_output.strip():
+                session['output_lines'].append(f"Command failed with exit code {return_code}.\n")
+        _refresh_stream_window(session)
+
+    session['controller'] = stream_docker_cmd(
+        command,
+        sudo=sudo,
+        sudo_password=sudo_password,
+        output_callback=lambda line: root.after(0, lambda value=line: append_output(value)),
+        complete_callback=lambda output, code, was_cancelled: root.after(
+            0, lambda: mark_complete(output, code, was_cancelled)
+        ),
+    )
+
+    return session
+
+
+def reopen_latest_build_status_window(root):
+    """Reopen the latest build status window if a build session exists."""
+    if not _LATEST_BUILD_SESSION:
+        messagebox.showinfo("Build Status", "No image build session has been started yet.", parent=root)
+        return
+
+    _show_stream_session_window(root, _LATEST_BUILD_SESSION)
+
+    return _LATEST_BUILD_SESSION['window']
 
 
 def pull_image_dialog(root, refresh_callback):
@@ -82,6 +360,310 @@ def pull_image_dialog(root, refresh_callback):
 
     image_entry.bind("<Return>", lambda e: on_pull())
     image_entry.bind("<Escape>", lambda e: dialog.destroy())
+
+
+def build_image_dialog(root, show_text_output_callback, refresh_callback=None):
+    """Build a Docker image from a local context directory."""
+    if not check_docker_running(): return
+    global _LATEST_BUILD_SESSION
+
+    dialog = tk.Toplevel(root)
+    dialog.title("Build Docker Image")
+    dialog.transient(root)
+    dialog.grab_set()
+
+    ttk.Label(dialog, text="Image tag (required):", font=("Arial", 10)).grid(row=0, column=0, sticky="w", padx=16, pady=(16, 6))
+    tag_var = tk.StringVar()
+    ttk.Entry(dialog, textvariable=tag_var, width=48).grid(row=0, column=1, columnspan=2, sticky="ew", padx=16, pady=(16, 6))
+
+    ttk.Label(dialog, text="Build context:", font=("Arial", 10)).grid(row=1, column=0, sticky="w", padx=16, pady=6)
+    context_var = tk.StringVar()
+    ttk.Entry(dialog, textvariable=context_var, width=48).grid(row=1, column=1, sticky="ew", padx=16, pady=6)
+    ttk.Button(
+        dialog, text="Browse",
+        command=lambda: context_var.set(filedialog.askdirectory(parent=dialog) or context_var.get()),
+        width=10
+    ).grid(row=1, column=2, padx=(0, 16), pady=6)
+
+    ttk.Label(dialog, text="Dockerfile (optional):", font=("Arial", 10)).grid(row=2, column=0, sticky="w", padx=16, pady=6)
+    dockerfile_var = tk.StringVar()
+    ttk.Entry(dialog, textvariable=dockerfile_var, width=48).grid(row=2, column=1, sticky="ew", padx=16, pady=6)
+    ttk.Button(
+        dialog, text="Browse",
+        command=lambda: dockerfile_var.set(
+            filedialog.askopenfilename(parent=dialog, filetypes=[("Dockerfile", "*"), ("All files", "*.*")]) or dockerfile_var.get()
+        ),
+        width=10
+    ).grid(row=2, column=2, padx=(0, 16), pady=6)
+
+    ttk.Label(dialog, text="Build args (KEY=VALUE, one per line):", font=("Arial", 10)).grid(row=3, column=0, columnspan=3, sticky="w", padx=16, pady=(8, 4))
+    build_args_text = tk.Text(dialog, height=5, width=60, font=("JetBrains Mono", 9))
+    build_args_text.grid(row=4, column=0, columnspan=3, sticky="nsew", padx=16, pady=(0, 8))
+
+    dialog.columnconfigure(1, weight=1)
+    dialog.rowconfigure(4, weight=1)
+
+    def on_build():
+        global _LATEST_BUILD_SESSION
+        context_path = context_var.get().strip()
+        if not context_path:
+            messagebox.showwarning("Context Required", "Please choose a build context directory.", parent=dialog)
+            return
+
+        tag = tag_var.get().strip()
+        if not tag:
+            messagebox.showwarning("Tag Required", "Please enter an image tag, for example: myapp:latest", parent=dialog)
+            return
+        dockerfile_path = dockerfile_var.get().strip()
+        build_args = _split_csv_lines(build_args_text.get("1.0", tk.END))
+
+        command = DOCKER_IMAGE_BUILD.format(
+            tag=f"-t {_quote(tag)} " if tag else "",
+            dockerfile=f"-f {_quote(dockerfile_path)} " if dockerfile_path else "",
+            build_args=''.join(f"--build-arg {_quote(item)} " for item in build_args),
+            context=_quote(context_path),
+        )
+
+        _LATEST_BUILD_SESSION = _start_stream_session(
+            root,
+            "Docker Image Build",
+            command,
+            sudo=True,
+            sudo_password=get_sudo_password(),
+            on_success=lambda: refresh_callback() if refresh_callback else None,
+            success_validator=lambda: _verify_built_image_tag(tag, get_sudo_password()),
+        )
+        build_window = _show_stream_session_window(root, _LATEST_BUILD_SESSION)
+        dialog.destroy()
+        build_window.lift()
+
+    btn_frame = ttk.Frame(dialog)
+    btn_frame.grid(row=5, column=0, columnspan=3, pady=(8, 16))
+    ttk.Button(btn_frame, text="Build", style="primary.TButton", command=on_build, width=12).pack(side=tk.LEFT, padx=5)
+    ttk.Button(btn_frame, text="Cancel", command=dialog.destroy, width=12).pack(side=tk.LEFT, padx=5)
+
+    _center_dialog(dialog, min_width=700)
+
+
+def load_image_dialog(root, show_text_output_callback, refresh_callback=None):
+    """Load a Docker image archive from disk."""
+    if not check_docker_running(): return
+
+    filename = filedialog.askopenfilename(
+        parent=root,
+        title="Load Docker Image",
+        filetypes=[("Tar archives", "*.tar"), ("All files", "*.*")],
+    )
+    if not filename:
+        return
+
+    command = DOCKER_IMAGE_LOAD.format(input_file=_quote(filename))
+    run_docker_cmd(
+        command,
+        sudo=True,
+        sudo_password=get_sudo_password(),
+        callback=_make_output_callback(show_text_output_callback, "Image Load", refresh_callback, root),
+    )
+
+
+def create_volume_dialog(root, show_text_output_callback, refresh_callback=None):
+    """Create a new Docker volume."""
+    if not check_docker_running(): return
+
+    dialog = tk.Toplevel(root)
+    dialog.title("Create Docker Volume")
+    dialog.transient(root)
+    dialog.grab_set()
+
+    ttk.Label(dialog, text="Volume name:", font=("Arial", 10)).pack(padx=20, pady=(20, 8), anchor="w")
+    name_var = tk.StringVar()
+    entry = ttk.Entry(dialog, textvariable=name_var, width=36)
+    entry.pack(padx=20, pady=4)
+    entry.focus()
+
+    def on_create():
+        name = name_var.get().strip()
+        if not name:
+            messagebox.showwarning("Name Required", "Please enter a volume name.", parent=dialog)
+            return
+        dialog.destroy()
+        run_docker_cmd(
+            DOCKER_VOLUME_CREATE.format(name=_quote(name)),
+            sudo=True,
+            sudo_password=get_sudo_password(),
+            callback=_make_output_callback(show_text_output_callback, "Volume Create", refresh_callback, root),
+        )
+
+    btn_frame = ttk.Frame(dialog)
+    btn_frame.pack(pady=(10, 20))
+    ttk.Button(btn_frame, text="Create", style="primary.TButton", command=on_create, width=12).pack(side=tk.LEFT, padx=5)
+    ttk.Button(btn_frame, text="Cancel", command=dialog.destroy, width=12).pack(side=tk.LEFT, padx=5)
+
+    _center_dialog(dialog, min_width=360)
+
+
+def create_network_dialog(root, show_text_output_callback, refresh_callback=None):
+    """Create a new Docker network."""
+    if not check_docker_running(): return
+
+    dialog = tk.Toplevel(root)
+    dialog.title("Create Docker Network")
+    dialog.transient(root)
+    dialog.grab_set()
+
+    ttk.Label(dialog, text="Network name:", font=("Arial", 10)).grid(row=0, column=0, sticky="w", padx=16, pady=(16, 6))
+    name_var = tk.StringVar()
+    ttk.Entry(dialog, textvariable=name_var, width=36).grid(row=0, column=1, sticky="ew", padx=16, pady=(16, 6))
+
+    ttk.Label(dialog, text="Driver:", font=("Arial", 10)).grid(row=1, column=0, sticky="w", padx=16, pady=6)
+    driver_var = tk.StringVar(value="bridge")
+    ttk.Combobox(dialog, textvariable=driver_var, values=["bridge", "overlay", "host", "macvlan"], state="readonly", width=20).grid(row=1, column=1, sticky="w", padx=16, pady=6)
+
+    ttk.Label(dialog, text="Subnet (optional):", font=("Arial", 10)).grid(row=2, column=0, sticky="w", padx=16, pady=6)
+    subnet_var = tk.StringVar()
+    ttk.Entry(dialog, textvariable=subnet_var, width=36).grid(row=2, column=1, sticky="ew", padx=16, pady=6)
+
+    ttk.Label(dialog, text="Gateway (optional):", font=("Arial", 10)).grid(row=3, column=0, sticky="w", padx=16, pady=6)
+    gateway_var = tk.StringVar()
+    ttk.Entry(dialog, textvariable=gateway_var, width=36).grid(row=3, column=1, sticky="ew", padx=16, pady=6)
+
+    dialog.columnconfigure(1, weight=1)
+
+    def on_create():
+        name = name_var.get().strip()
+        if not name:
+            messagebox.showwarning("Name Required", "Please enter a network name.", parent=dialog)
+            return
+
+        options = ""
+        if subnet_var.get().strip():
+            options += f" --subnet {_quote(subnet_var.get().strip())}"
+        if gateway_var.get().strip():
+            options += f" --gateway {_quote(gateway_var.get().strip())}"
+
+        dialog.destroy()
+        run_docker_cmd(
+            DOCKER_NETWORK_CREATE.format(
+                driver=_quote(driver_var.get().strip() or "bridge"),
+                options=options,
+                name=_quote(name),
+            ),
+            sudo=True,
+            sudo_password=get_sudo_password(),
+            callback=_make_output_callback(show_text_output_callback, "Network Create", refresh_callback, root),
+        )
+
+    btn_frame = ttk.Frame(dialog)
+    btn_frame.grid(row=4, column=0, columnspan=2, pady=(10, 16))
+    ttk.Button(btn_frame, text="Create", style="primary.TButton", command=on_create, width=12).pack(side=tk.LEFT, padx=5)
+    ttk.Button(btn_frame, text="Cancel", command=dialog.destroy, width=12).pack(side=tk.LEFT, padx=5)
+
+    _center_dialog(dialog, min_width=520)
+
+
+def _parse_conflict_container_ids(output):
+    """Return list of container IDs that caused 'name already in use' conflicts."""
+    import re
+    return re.findall(
+        r'container name .+ already in use by container "([a-f0-9]+)"',
+        output,
+        re.IGNORECASE,
+    )
+
+
+def compose_up_from_file_dialog(root, show_text_output_callback, refresh_callback=None, show_loading_callback=None):
+    """Start a compose project from a selected compose file."""
+    if not check_docker_running(): return
+
+    filename = filedialog.askopenfilename(
+        parent=root,
+        title="Select Compose File",
+        filetypes=[
+            ("Compose files", "*.yml *.yaml"),
+            ("All files", "*.*"),
+        ],
+    )
+    if not filename:
+        return
+
+    # Validate: file must contain a 'services:' key to be a real compose file
+    try:
+        with open(filename, 'r') as fh:
+            content = fh.read()
+        if 'services:' not in content:
+            messagebox.showerror(
+                "Invalid Compose File",
+                f"The selected file does not appear to be a valid Docker Compose file "
+                f"(no 'services:' key found).\n\n"
+                f"File: {filename}\n\n"
+                f"Tip: look for a file named docker-compose.yml that contains a 'services:' section.",
+                parent=root,
+            )
+            return
+    except OSError as exc:
+        messagebox.showerror("Cannot Read File", str(exc), parent=root)
+        return
+
+    def _run_compose_up():
+        files_arg = _compose_files_to_args(filename)
+        command = DOCKER_COMPOSE_UP.format(files=files_arg)
+        run_docker_cmd(
+            command,
+            sudo=True,
+            sudo_password=get_sudo_password(),
+            callback=_on_compose_up_result,
+            loading_callback=show_loading_callback,
+        )
+
+    def _on_compose_up_result(result):
+        show_text_output_callback(f"Compose Up\n\n{result}".strip())
+
+        conflict_ids = _parse_conflict_container_ids(result)
+        if conflict_ids:
+            # Extract short container names from error lines for the prompt
+            import re
+            names = re.findall(r'container name "(/[^"]+)" is already in use', result, re.IGNORECASE)
+            name_list = "\n".join(f"  • {n}" for n in names) if names else \
+                        "\n".join(f"  • {cid[:12]}" for cid in conflict_ids)
+            answer = messagebox.askyesno(
+                "Container Conflicts — Remove and Retry?",
+                f"The following containers are blocking the compose project:\n\n"
+                f"{name_list}\n\n"
+                f"Remove them now and retry Compose Up?",
+                icon="warning",
+                parent=root,
+            )
+            if answer:
+                _remove_and_retry(conflict_ids)
+            return
+
+        # No conflict — check for other errors
+        result_lower = result.lower()
+        has_error = any(hint in result_lower for hint in _ERROR_HINTS)
+        if not has_error and refresh_callback and root:
+            root.after(800, refresh_callback)
+
+    def _remove_and_retry(container_ids):
+        from src.utils.threads import startThreadForTask
+        from src.utils.utils import run_cmd
+
+        def task():
+            if show_loading_callback:
+                show_loading_callback(True)
+            ids_str = " ".join(container_ids)
+            remove_result = run_cmd(
+                f"docker rm -f {ids_str}",
+                sudo=True,
+                sudo_password=get_sudo_password(),
+            )
+            if show_loading_callback:
+                show_loading_callback(False)
+            show_text_output_callback(f"Removed conflicting containers:\n{remove_result}\n\nRetrying Compose Up…")
+            root.after(300, _run_compose_up)
+
+        startThreadForTask(task)
+
+    _run_compose_up()
 
 
 def open_container_terminal_dialog(root, display_manager):
@@ -789,162 +1371,581 @@ def copy_table_rows(root, table_widget):
     root.clipboard_append(text)
 
 
-def create_selected_item_actions(action_frame, root, display_manager, refresh_images_callback):
+def create_selected_item_actions(action_frame, root, display_manager, refresh_images_callback, show_loading_callback=None):
     """Create action buttons for selected items in tables"""
-    from src.docker.docker_operations import run_docker_cmd
     from src.config.config_manager import get_sudo_password
     from src.ui.ui_components import confirm_action_dialog
-    
+    from src.docker.docker_commands_constants import (
+        DOCKER_CONTAINER_START, DOCKER_CONTAINER_STOP, DOCKER_CONTAINER_RESTART,
+        DOCKER_CONTAINER_RM, DOCKER_CONTAINER_PAUSE, DOCKER_CONTAINER_UNPAUSE,
+        DOCKER_CONTAINER_RENAME, DOCKER_CONTAINER_COMMIT, DOCKER_CONTAINER_INSPECT,
+        DOCKER_IMAGE_RM, DOCKER_IMAGE_TAG, DOCKER_IMAGE_SAVE, DOCKER_IMAGE_HISTORY,
+        DOCKER_IMAGE_INSPECT, DOCKER_VOLUME_RM, DOCKER_VOLUME_INSPECT,
+        DOCKER_NETWORK_RM, DOCKER_NETWORK_INSPECT, DOCKER_NETWORK_CONNECT,
+        DOCKER_NETWORK_DISCONNECT, DOCKER_COMPOSE_UP, DOCKER_COMPOSE_DOWN,
+        DOCKER_COMPOSE_RESTART, DOCKER_COMPOSE_LOGS, DOCKER_COMPOSE_CONFIG,
+        DOCKER_COMPOSE_PS
+    )
+
+    def _selected_rows(resource_name, table_type=None, allow_multiple=True):
+        selection = display_manager.get_selected_items()
+        if not selection:
+            messagebox.showwarning("No Selection", f"Please select {resource_name} from the table")
+            return None
+        if table_type:
+            allowed_types = table_type if isinstance(table_type, (tuple, list, set)) else (table_type,)
+            if display_manager.current_table_type not in allowed_types:
+                expected = ', '.join(allowed_types)
+                messagebox.showwarning("Wrong View", f"Select {resource_name} from the {expected} table.")
+                return None
+        if not allow_multiple and len(selection) > 1:
+            messagebox.showwarning("Multiple Selection", f"Please select only one {resource_name}.")
+            return None
+        return [display_manager.get_item_values(item) for item in selection]
+
+    def _run_output_command(command, title):
+        run_docker_cmd(
+            command,
+            sudo=True,
+            sudo_password=get_sudo_password(),
+            callback=_make_output_callback(display_manager.show_text_output, title, None, root),
+            loading_callback=show_loading_callback,
+        )
+
+    def _prompt_value(title, label, initial_value=""):
+        dialog = tk.Toplevel(root)
+        dialog.title(title)
+        dialog.transient(root)
+        dialog.grab_set()
+
+        result = {'value': None}
+        ttk.Label(dialog, text=label, font=("Arial", 10)).pack(padx=20, pady=(20, 8), anchor="w")
+        value_var = tk.StringVar(value=initial_value)
+        entry = ttk.Entry(dialog, textvariable=value_var, width=42)
+        entry.pack(padx=20, pady=4)
+        entry.focus()
+
+        def on_ok():
+            value = value_var.get().strip()
+            if value:
+                result['value'] = value
+                dialog.destroy()
+            else:
+                messagebox.showwarning("Input Required", "Please enter a value.", parent=dialog)
+
+        btn_frame = ttk.Frame(dialog)
+        btn_frame.pack(pady=(10, 20))
+        ttk.Button(btn_frame, text="OK", style="primary.TButton", command=on_ok, width=10).pack(side=tk.LEFT, padx=5)
+        ttk.Button(btn_frame, text="Cancel", command=dialog.destroy, width=10).pack(side=tk.LEFT, padx=5)
+
+        entry.bind("<Return>", lambda e: on_ok())
+        entry.bind("<Escape>", lambda e: dialog.destroy())
+        _center_dialog(dialog, min_width=360)
+        dialog.wait_window()
+        return result['value']
+
+    def _container_ids(rows):
+        return [row[1] for row in rows]
+
+    def _container_name(row):
+        return row[2]
+
+    def _image_ref(row):
+        repo = row[1]
+        tag = row[2]
+        image_id = row[3]
+        if repo == "<none>" or tag == "<none>":
+            return image_id
+        return f"{repo}:{tag}"
+
+    def _network_name(row):
+        return row[2]
+
+    def _compose_project(row):
+        return row[1], row[3]
+
     def start_selected_container():
         if not check_docker_running(): return
-        selection = display_manager.get_selected_items()
-        if not selection:
-            messagebox.showwarning("No Selection", "Please select a container from the table")
+        rows = _selected_rows("container", table_type=('container', 'container_stats'))
+        if not rows:
             return
-        container_ids = [display_manager.get_item_values(item)[1] for item in selection]
-        run_docker_cmd(f"docker start {' '.join(container_ids)}", sudo=True, 
-                      sudo_password=get_sudo_password(), callback=display_manager.show_text_output)
-    
+        _run_output_command(
+            DOCKER_CONTAINER_START.format(containers=_join_quoted(_container_ids(rows))),
+            "Container Start",
+        )
+
     def stop_selected_container():
         if not check_docker_running(): return
-        selection = display_manager.get_selected_items()
-        if not selection:
-            messagebox.showwarning("No Selection", "Please select a container from the table")
+        rows = _selected_rows("container", table_type=('container', 'container_stats'))
+        if not rows:
             return
-        container_ids = [display_manager.get_item_values(item)[1] for item in selection]
-        run_docker_cmd(f"docker stop {' '.join(container_ids)}", sudo=True, 
-                      sudo_password=get_sudo_password(), callback=display_manager.show_text_output)
-    
+        _run_output_command(
+            DOCKER_CONTAINER_STOP.format(containers=_join_quoted(_container_ids(rows))),
+            "Container Stop",
+        )
+
+    def restart_selected_container():
+        if not check_docker_running(): return
+        rows = _selected_rows("container", table_type=('container', 'container_stats'))
+        if not rows:
+            return
+        _run_output_command(
+            DOCKER_CONTAINER_RESTART.format(containers=_join_quoted(_container_ids(rows))),
+            "Container Restart",
+        )
+
+    def pause_selected_container():
+        if not check_docker_running(): return
+        rows = _selected_rows("container", table_type=('container', 'container_stats'))
+        if not rows:
+            return
+        _run_output_command(
+            DOCKER_CONTAINER_PAUSE.format(containers=_join_quoted(_container_ids(rows))),
+            "Container Pause",
+        )
+
+    def unpause_selected_container():
+        if not check_docker_running(): return
+        rows = _selected_rows("container", table_type=('container', 'container_stats'))
+        if not rows:
+            return
+        _run_output_command(
+            DOCKER_CONTAINER_UNPAUSE.format(containers=_join_quoted(_container_ids(rows))),
+            "Container Unpause",
+        )
+
+    def rename_selected_container():
+        if not check_docker_running(): return
+        rows = _selected_rows("container", table_type=('container', 'container_stats'), allow_multiple=False)
+        if not rows:
+            return
+        new_name = _prompt_value("Rename Container", "New container name:", _container_name(rows[0]))
+        if not new_name:
+            return
+        _run_output_command(
+            DOCKER_CONTAINER_RENAME.format(old_name=_quote(rows[0][1]), new_name=_quote(new_name)),
+            "Container Rename",
+        )
+
     def delete_selected_container():
         if not check_docker_running(): return
-        selection = display_manager.get_selected_items()
-        if not selection:
-            messagebox.showwarning("No Selection", "Please select a container from the table")
+        rows = _selected_rows("container", table_type=('container', 'container_stats'))
+        if not rows:
             return
-        container_ids = [display_manager.get_item_values(item)[1] for item in selection]
-        count = len(container_ids)
-        msg = f"Delete {count} container(s)?" if count > 1 else f"Delete container {container_ids[0]}?"
+        count = len(rows)
+        msg = f"Delete {count} container(s)?" if count > 1 else f"Delete container {rows[0][1]}?"
         if confirm_action_dialog(root, "Confirm", msg):
-            run_docker_cmd(f"docker rm -f {' '.join(container_ids)}", sudo=True, 
-                          sudo_password=get_sudo_password(), callback=display_manager.show_text_output)
-    
+            _run_output_command(
+                DOCKER_CONTAINER_RM.format(containers=_join_quoted(_container_ids(rows))),
+                "Container Delete",
+            )
+
+    def inspect_selected_container():
+        if not check_docker_running(): return
+        rows = _selected_rows("container", table_type=('container', 'container_stats'), allow_multiple=False)
+        if not rows:
+            return
+        _run_output_command(
+            DOCKER_CONTAINER_INSPECT.format(container=_quote(rows[0][1])),
+            "Container Inspect",
+        )
+
+    def commit_selected_container():
+        if not check_docker_running(): return
+        rows = _selected_rows("container", table_type=('container', 'container_stats'), allow_multiple=False)
+        if not rows:
+            return
+        image_ref = _prompt_value("Commit Container", "New image name (e.g. myapp:snapshot):")
+        if not image_ref:
+            return
+        _run_output_command(
+            DOCKER_CONTAINER_COMMIT.format(container=_quote(rows[0][1]), image=_quote(image_ref)),
+            "Container Commit",
+        )
+
     def delete_selected_image():
         if not check_docker_running(): return
-        selection = display_manager.get_selected_items()
-        if not selection:
-            messagebox.showwarning("No Selection", "Please select an image from the table")
+        rows = _selected_rows("image", table_type='image')
+        if not rows:
             return
-        image_ids = [display_manager.get_item_values(item)[3] for item in selection]
-        count = len(image_ids)
-        msg = f"Delete {count} image(s)?" if count > 1 else f"Delete image {image_ids[0]}?"
+        count = len(rows)
+        msg = f"Delete {count} image(s)?" if count > 1 else f"Delete image {_image_ref(rows[0])}?"
         if confirm_action_dialog(root, "Confirm", msg):
-            run_docker_cmd(f"docker rmi -f {' '.join(image_ids)}", sudo=True, 
-                          sudo_password=get_sudo_password(), callback=display_manager.show_text_output)
-    
+            _run_output_command(
+                DOCKER_IMAGE_RM.format(images=' '.join(_quote(row[3]) for row in rows)),
+                "Image Delete",
+            )
+
+    def tag_selected_image():
+        if not check_docker_running(): return
+        rows = _selected_rows("image", table_type='image', allow_multiple=False)
+        if not rows:
+            return
+        target_tag = _prompt_value("Tag Image", "New tag (e.g. repo:tag):")
+        if not target_tag:
+            return
+        _run_output_command(
+            DOCKER_IMAGE_TAG.format(source=_quote(_image_ref(rows[0])), target=_quote(target_tag)),
+            "Image Tag",
+        )
+
+    def save_selected_image():
+        if not check_docker_running(): return
+        rows = _selected_rows("image", table_type='image', allow_multiple=False)
+        if not rows:
+            return
+        filename = filedialog.asksaveasfilename(
+            parent=root,
+            defaultextension=".tar",
+            filetypes=[("Tar archives", "*.tar"), ("All files", "*.*")],
+            initialfile=f"{rows[0][1].replace('/', '_')}_{rows[0][2]}.tar",
+        )
+        if not filename:
+            return
+        _run_output_command(
+            DOCKER_IMAGE_SAVE.format(output_file=_quote(filename), image=_quote(_image_ref(rows[0]))),
+            "Image Save",
+        )
+
+    def inspect_selected_image():
+        if not check_docker_running(): return
+        rows = _selected_rows("image", table_type='image', allow_multiple=False)
+        if not rows:
+            return
+        _run_output_command(
+            DOCKER_IMAGE_INSPECT.format(image=_quote(_image_ref(rows[0]))),
+            "Image Inspect",
+        )
+
+    def history_selected_image():
+        if not check_docker_running(): return
+        rows = _selected_rows("image", table_type='image', allow_multiple=False)
+        if not rows:
+            return
+        _run_output_command(
+            DOCKER_IMAGE_HISTORY.format(image=_quote(_image_ref(rows[0]))),
+            "Image History",
+        )
+
     def delete_selected_volume():
         if not check_docker_running(): return
-        selection = display_manager.get_selected_items()
-        if not selection:
-            messagebox.showwarning("No Selection", "Please select a volume from the table")
+        rows = _selected_rows("volume", table_type='volume')
+        if not rows:
             return
-        volume_names = [display_manager.get_item_values(item)[1] for item in selection]
-        count = len(volume_names)
-        msg = f"Delete {count} volume(s)?" if count > 1 else f"Delete volume {volume_names[0]}?"
+        count = len(rows)
+        msg = f"Delete {count} volume(s)?" if count > 1 else f"Delete volume {rows[0][1]}?"
         if confirm_action_dialog(root, "Confirm", msg):
-            run_docker_cmd(f"docker volume rm {' '.join(volume_names)}", sudo=True, 
-                          sudo_password=get_sudo_password(), callback=display_manager.show_text_output)
-    
+            _run_output_command(
+                DOCKER_VOLUME_RM.format(volumes=' '.join(_quote(row[1]) for row in rows)),
+                "Volume Delete",
+            )
+
+    def inspect_selected_volume():
+        if not check_docker_running(): return
+        rows = _selected_rows("volume", table_type='volume', allow_multiple=False)
+        if not rows:
+            return
+        _run_output_command(
+            DOCKER_VOLUME_INSPECT.format(volume=_quote(rows[0][1])),
+            "Volume Inspect",
+        )
+
+    def delete_selected_network():
+        if not check_docker_running(): return
+        rows = _selected_rows("network", table_type='network')
+        if not rows:
+            return
+        count = len(rows)
+        msg = f"Delete {count} network(s)?" if count > 1 else f"Delete network {_network_name(rows[0])}?"
+        if confirm_action_dialog(root, "Confirm", msg):
+            _run_output_command(
+                DOCKER_NETWORK_RM.format(networks=' '.join(_quote(_network_name(row)) for row in rows)),
+                "Network Delete",
+            )
+
+    def inspect_selected_network():
+        if not check_docker_running(): return
+        rows = _selected_rows("network", table_type='network', allow_multiple=False)
+        if not rows:
+            return
+        _run_output_command(
+            DOCKER_NETWORK_INSPECT.format(network=_quote(_network_name(rows[0]))),
+            "Network Inspect",
+        )
+
+    def connect_selected_network():
+        if not check_docker_running(): return
+        rows = _selected_rows("network", table_type='network', allow_multiple=False)
+        if not rows:
+            return
+        container_ref = _prompt_value("Connect Network", "Container name or ID:")
+        if not container_ref:
+            return
+        _run_output_command(
+            DOCKER_NETWORK_CONNECT.format(network=_quote(_network_name(rows[0])), container=_quote(container_ref)),
+            "Network Connect",
+        )
+
+    def disconnect_selected_network():
+        if not check_docker_running(): return
+        rows = _selected_rows("network", table_type='network', allow_multiple=False)
+        if not rows:
+            return
+        container_ref = _prompt_value("Disconnect Network", "Container name or ID:")
+        if not container_ref:
+            return
+        _run_output_command(
+            DOCKER_NETWORK_DISCONNECT.format(network=_quote(_network_name(rows[0])), container=_quote(container_ref)),
+            "Network Disconnect",
+        )
+
     def run_container_from_image():
         if not check_docker_running(): return
-        selection = display_manager.get_selected_items()
-        if not selection:
-            messagebox.showwarning("No Selection", "Please select an image from the table")
+        rows = _selected_rows("image", table_type='image')
+        if not rows:
             return
-        
-        images = []
-        for item in selection:
-            values = display_manager.get_item_values(item)
-            repo = values[1]
-            tag = values[2]
-            if repo == "<none>" or tag == "<none>":
-                image_id = values[3]
-                images.append(image_id)
-            else:
-                images.append(f"{repo}:{tag}")
-        
-        # For single image, allow name input
-        if len(images) == 1:
-            dialog = tk.Toplevel(root)
-            dialog.title("Run Container")
-            dialog.geometry("450x200")
-            dialog.resizable(False, False)
-            dialog.transient(root)
-            dialog.grab_set()
-            
-            ttk.Label(dialog, text=f"Run container from: {images[0]}", 
-                     font=("Arial", 10, "bold")).pack(pady=(20, 10))
-            
-            ttk.Label(dialog, text="Container name (optional):", 
-                     font=("Arial", 10)).pack(pady=(10, 5))
-            
-            name_var = tk.StringVar()
-            name_entry = ttk.Entry(dialog, textvariable=name_var, font=("Arial", 11), width=40)
-            name_entry.pack(pady=5)
-            name_entry.focus()
-            
-            ttk.Label(dialog, text="Leave empty for auto-generated name", 
-                     font=("Arial", 8), foreground="gray").pack(pady=2)
-            
-            def on_run():
-                container_name = name_var.get().strip()
-                name_param = f"--name {container_name} " if container_name else ""
-                command = DOCKER_RUN_DETACHED.format(name=name_param, image=images[0])
-                dialog.destroy()
-                run_docker_cmd(command, sudo=True, sudo_password=get_sudo_password(), 
-                              callback=display_manager.show_text_output)
-            
-            btn_frame = ttk.Frame(dialog)
-            btn_frame.pack(pady=20)
-            ttk.Button(btn_frame, text="Run", command=on_run, width=12).pack(side=tk.LEFT, padx=5)
-            ttk.Button(btn_frame, text="Cancel", command=dialog.destroy, width=12).pack(side=tk.LEFT, padx=5)
-            
-            name_entry.bind("<Return>", lambda e: on_run())
-            name_entry.bind("<Escape>", lambda e: dialog.destroy())
-        else:
-            # Multiple images - no name input
+
+        images = [_image_ref(row) for row in rows]
+
+        if len(images) > 1:
             count = len(images)
-            msg = f"Run container(s) from {count} image(s)?"
+            msg = f"Run container(s) from {count} selected image(s)?"
             if confirm_action_dialog(root, "Confirm", msg):
-                commands = ' && '.join([DOCKER_RUN_DETACHED.format(name="", image=img) for img in images])
-                run_docker_cmd(commands, sudo=True, sudo_password=get_sudo_password(), 
-                              callback=display_manager.show_text_output)
-    
+                commands = ' && '.join(
+                    DOCKER_RUN_DETACHED.format(
+                        restart_policy="unless-stopped",
+                        name="",
+                        ports="",
+                        envs="",
+                        volumes="",
+                        network="",
+                        extra_args="",
+                        image=f" {_quote(image)}",
+                        command="",
+                    )
+                    for image in images
+                )
+                _run_output_command(commands, "Container Run")
+            return
+
+        dialog = tk.Toplevel(root)
+        dialog.title("Run Container")
+        dialog.transient(root)
+        dialog.grab_set()
+
+        ttk.Label(dialog, text=f"Image: {images[0]}", font=("Arial", 10, "bold")).grid(row=0, column=0, columnspan=2, sticky="w", padx=16, pady=(16, 10))
+
+        name_var = tk.StringVar()
+        restart_var = tk.StringVar(value="unless-stopped")
+        network_names = [name for name in run_cmd(DOCKER_NETWORK_NAMES).splitlines() if name.strip()]
+        network_var = tk.StringVar(value="")
+        command_var = tk.StringVar()
+
+        ttk.Label(dialog, text="Container name:", font=("Arial", 10)).grid(row=1, column=0, sticky="w", padx=16, pady=4)
+        ttk.Entry(dialog, textvariable=name_var, width=42).grid(row=1, column=1, sticky="ew", padx=16, pady=4)
+
+        ttk.Label(dialog, text="Restart policy:", font=("Arial", 10)).grid(row=2, column=0, sticky="w", padx=16, pady=4)
+        ttk.Combobox(dialog, textvariable=restart_var, values=["unless-stopped", "always", "on-failure", "no"], state="readonly", width=20).grid(row=2, column=1, sticky="w", padx=16, pady=4)
+
+        ttk.Label(dialog, text="Network:", font=("Arial", 10)).grid(row=3, column=0, sticky="w", padx=16, pady=4)
+        ttk.Combobox(dialog, textvariable=network_var, values=[""] + network_names, state="readonly", width=30).grid(row=3, column=1, sticky="w", padx=16, pady=4)
+
+        ttk.Label(dialog, text="Ports (one per line, e.g. 8080:80):", font=("Arial", 10)).grid(row=4, column=0, columnspan=2, sticky="w", padx=16, pady=(8, 4))
+        ports_text = tk.Text(dialog, height=3, width=50, font=("JetBrains Mono", 9))
+        ports_text.grid(row=5, column=0, columnspan=2, sticky="ew", padx=16, pady=4)
+
+        ttk.Label(dialog, text="Environment (KEY=VALUE):", font=("Arial", 10)).grid(row=6, column=0, columnspan=2, sticky="w", padx=16, pady=(8, 4))
+        env_text = tk.Text(dialog, height=3, width=50, font=("JetBrains Mono", 9))
+        env_text.grid(row=7, column=0, columnspan=2, sticky="ew", padx=16, pady=4)
+
+        ttk.Label(dialog, text="Volumes (source:/target):", font=("Arial", 10)).grid(row=8, column=0, columnspan=2, sticky="w", padx=16, pady=(8, 4))
+        volume_text = tk.Text(dialog, height=3, width=50, font=("JetBrains Mono", 9))
+        volume_text.grid(row=9, column=0, columnspan=2, sticky="ew", padx=16, pady=4)
+
+        ttk.Label(dialog, text="Command override (optional):", font=("Arial", 10)).grid(row=10, column=0, sticky="w", padx=16, pady=4)
+        ttk.Entry(dialog, textvariable=command_var, width=42).grid(row=10, column=1, sticky="ew", padx=16, pady=4)
+
+        dialog.columnconfigure(1, weight=1)
+
+        def on_run():
+            ports = _split_csv_lines(ports_text.get("1.0", tk.END))
+            envs = _split_csv_lines(env_text.get("1.0", tk.END))
+            volumes = _split_csv_lines(volume_text.get("1.0", tk.END))
+
+            command_tail = ""
+            custom_command = command_var.get().strip()
+            if custom_command:
+                try:
+                    command_tail = " " + ' '.join(_quote(part) for part in shlex.split(custom_command))
+                except ValueError as exc:
+                    messagebox.showwarning("Invalid Command", f"Could not parse command override: {exc}", parent=dialog)
+                    return
+
+            command = DOCKER_RUN_DETACHED.format(
+                restart_policy=_quote(restart_var.get().strip() or "unless-stopped"),
+                name=f" --name {_quote(name_var.get().strip())}" if name_var.get().strip() else "",
+                ports=_join_flag_values("-p", ports),
+                envs=_join_flag_values("-e", envs),
+                volumes=_join_flag_values("-v", volumes),
+                network=f" --network {_quote(network_var.get().strip())}" if network_var.get().strip() else "",
+                extra_args="",
+                image=f" {_quote(images[0])}",
+                command=command_tail,
+            )
+            dialog.destroy()
+            _run_output_command(command, "Container Run")
+
+        btn_frame = ttk.Frame(dialog)
+        btn_frame.grid(row=11, column=0, columnspan=2, pady=(12, 16))
+        ttk.Button(btn_frame, text="Run", style="primary.TButton", command=on_run, width=12).pack(side=tk.LEFT, padx=5)
+        ttk.Button(btn_frame, text="Cancel", command=dialog.destroy, width=12).pack(side=tk.LEFT, padx=5)
+
+        _center_dialog(dialog, min_width=640)
+
     def stop_containers_using_image():
         if not check_docker_running(): return
-        selection = display_manager.get_selected_items()
-        if not selection:
-            messagebox.showwarning("No Selection", "Please select an image from the table")
+        rows = _selected_rows("image", table_type='image')
+        if not rows:
             return
-        
-        image_ids = [display_manager.get_item_values(item)[3] for item in selection]
-        
+
         all_containers = []
-        for img_id in image_ids:
-            containers = run_cmd(DOCKER_INSPECT_ANCESTOR.format(image_id=img_id))
+        for row in rows:
+            containers = run_cmd(DOCKER_INSPECT_ANCESTOR.format(image_id=row[3]))
             if containers:
-                all_containers.extend(containers.split('\n'))
-        
-        all_containers = [c for c in all_containers if c.strip()]
-        
+                all_containers.extend(containers.splitlines())
+
+        all_containers = [container for container in all_containers if container.strip()]
         if not all_containers:
             messagebox.showinfo("Info", "No containers found using selected image(s)")
             return
-        
+
         count = len(all_containers)
         msg = f"Stop {count} container(s) using selected image(s)?"
         if confirm_action_dialog(root, "Confirm", msg):
-            run_docker_cmd(f"docker stop {' '.join(all_containers)}", sudo=True, 
-                          sudo_password=get_sudo_password(), callback=display_manager.show_text_output)
+            _run_output_command(
+                DOCKER_CONTAINER_STOP.format(containers=_join_quoted(all_containers)),
+                "Stop Containers Using Image",
+            )
+
+    def compose_up_selected():
+        if not check_docker_running(): return
+        rows = _selected_rows("compose project", table_type='compose')
+        if not rows:
+            return
+        commands = []
+        for row in rows:
+            _project_name, files = _compose_project(row)
+            files_arg = _compose_files_to_args(files)
+            if files_arg:
+                commands.append(DOCKER_COMPOSE_UP.format(files=files_arg))
+        if commands:
+            _run_output_command(' && '.join(commands), "Compose Up")
+
+    def compose_down_selected():
+        if not check_docker_running(): return
+        rows = _selected_rows("compose project", table_type='compose')
+        if not rows:
+            return
+        commands = []
+        for row in rows:
+            _project_name, files = _compose_project(row)
+            files_arg = _compose_files_to_args(files)
+            if files_arg:
+                commands.append(DOCKER_COMPOSE_DOWN.format(files=files_arg))
+        if commands:
+            _run_output_command(' && '.join(commands), "Compose Down")
+
+    def compose_restart_selected():
+        if not check_docker_running(): return
+        rows = _selected_rows("compose project", table_type='compose')
+        if not rows:
+            return
+        commands = []
+        for row in rows:
+            _project_name, files = _compose_project(row)
+            files_arg = _compose_files_to_args(files)
+            if files_arg:
+                commands.append(DOCKER_COMPOSE_RESTART.format(files=files_arg))
+        if commands:
+            _run_output_command(' && '.join(commands), "Compose Restart")
+
+    def compose_logs_selected():
+        if not check_docker_running(): return
+        rows = _selected_rows("compose project", table_type='compose', allow_multiple=False)
+        if not rows:
+            return
+        project_name, files = _compose_project(rows[0])
+        files_arg = _compose_files_to_args(files)
+        if not files_arg:
+            messagebox.showwarning("Missing Compose Files", "This project does not expose compose file paths.")
+            return
+        _run_output_command(
+            DOCKER_COMPOSE_LOGS.format(files=files_arg, lines="200"),
+            f"Compose Logs - {project_name}",
+        )
+
+    def compose_services_selected():
+        if not check_docker_running(): return
+        rows = _selected_rows("compose project", table_type='compose', allow_multiple=False)
+        if not rows:
+            return
+        project_name, files = _compose_project(rows[0])
+        files_arg = _compose_files_to_args(files)
+        if not files_arg:
+            messagebox.showwarning("Missing Compose Files", "This project does not expose compose file paths.")
+            return
+
+        def callback(result):
+            import json as _json
+            service_rows = []
+            try:
+                data = _json.loads(result.strip() or "[]")
+                for item in data:
+                    ports = item.get("Publishers") or item.get("Ports") or ""
+                    if isinstance(ports, list):
+                        ports = ", ".join(
+                            f"{p.get('PublishedPort', '')}:{p.get('TargetPort', '')}/{p.get('Protocol', '')}"
+                            for p in ports if p.get("PublishedPort")
+                        )
+                    service_rows.append([
+                        item.get("ID", "")[:12],
+                        item.get("Name", ""),
+                        item.get("Service", ""),
+                        item.get("State", ""),
+                        str(ports),
+                    ])
+            except (_json.JSONDecodeError, TypeError):
+                pass
+            display_manager.show_table(
+                ["CONTAINER ID", "NAME", "SERVICE", "STATE", "PORTS"],
+                service_rows,
+                'compose_service',
+                f"Compose Services - {project_name}",
+                False,
+            )
+
+        async_run(
+            DOCKER_COMPOSE_PS.format(files=files_arg),
+            callback,
+            sudo=True,
+            sudo_password=get_sudo_password(),
+            loading_callback=show_loading_callback,
+        )
+
+    def compose_inspect_selected():
+        if not check_docker_running(): return
+        rows = _selected_rows("compose project", table_type='compose', allow_multiple=False)
+        if not rows:
+            return
+        project_name, files = _compose_project(rows[0])
+        files_arg = _compose_files_to_args(files)
+        if not files_arg:
+            messagebox.showwarning("Missing Compose Files", "This project does not expose compose file paths.")
+            return
+        _run_output_command(
+            DOCKER_COMPOSE_CONFIG.format(files=files_arg),
+            f"Compose Config - {project_name}",
+        )
     
     action_label = ttk.Label(action_frame, text="Actions on selected:",
                             font=("JetBrains Mono", 9, "bold"))
@@ -959,10 +1960,30 @@ def create_selected_item_actions(action_frame, root, display_manager, refresh_im
                                     command=stop_selected_container)
     Tooltip(btn_stop_container, ACTION_TOOLTIPS["stop_container"])
 
+    btn_restart_container = ttk.Button(action_frame, text="↻ Restart",
+                                       style="warning.Outline.TButton",
+                                       command=restart_selected_container)
+    Tooltip(btn_restart_container, ACTION_TOOLTIPS["restart_container"])
+
+    btn_pause_container = ttk.Button(action_frame, text="⏸ Pause",
+                                     style="secondary.Outline.TButton",
+                                     command=pause_selected_container)
+    Tooltip(btn_pause_container, ACTION_TOOLTIPS["pause_container"])
+
+    btn_unpause_container = ttk.Button(action_frame, text="▶ Resume",
+                                       style="success.Outline.TButton",
+                                       command=unpause_selected_container)
+    Tooltip(btn_unpause_container, ACTION_TOOLTIPS["unpause_container"])
+
     btn_delete_container = ttk.Button(action_frame, text="🗑 Delete",
                                       style="danger.Outline.TButton",
                                       command=delete_selected_container)
     Tooltip(btn_delete_container, ACTION_TOOLTIPS["delete_container"])
+
+    btn_rename_container = ttk.Button(action_frame, text="✎ Rename",
+                                      style="info.Outline.TButton",
+                                      command=rename_selected_container)
+    Tooltip(btn_rename_container, ACTION_TOOLTIPS["rename_container"])
 
     btn_container_terminal = ttk.Button(action_frame, text="💻 Terminal",
                                         style="info.Outline.TButton",
@@ -974,15 +1995,50 @@ def create_selected_item_actions(action_frame, root, display_manager, refresh_im
                                command=lambda: view_container_logs_dialog(root, display_manager))
     Tooltip(btn_view_logs, ACTION_TOOLTIPS["view_logs"])
 
+    btn_inspect_container = ttk.Button(action_frame, text="🔎 Inspect",
+                                       style="secondary.Outline.TButton",
+                                       command=inspect_selected_container)
+    Tooltip(btn_inspect_container, ACTION_TOOLTIPS["inspect_container"])
+
+    btn_commit_container = ttk.Button(action_frame, text="📦 Commit",
+                                      style="secondary.Outline.TButton",
+                                      command=commit_selected_container)
+    Tooltip(btn_commit_container, ACTION_TOOLTIPS["commit_container"])
+
     btn_delete_image = ttk.Button(action_frame, text="🗑 Delete Image",
                                   style="danger.Outline.TButton",
                                   command=delete_selected_image)
     Tooltip(btn_delete_image, ACTION_TOOLTIPS["delete_image"])
 
+    btn_tag_image = ttk.Button(action_frame, text="🏷 Tag",
+                               style="info.Outline.TButton",
+                               command=tag_selected_image)
+    Tooltip(btn_tag_image, ACTION_TOOLTIPS["tag_image"])
+
+    btn_save_image = ttk.Button(action_frame, text="💾 Save",
+                                style="secondary.Outline.TButton",
+                                command=save_selected_image)
+    Tooltip(btn_save_image, ACTION_TOOLTIPS["save_image"])
+
+    btn_inspect_image = ttk.Button(action_frame, text="🔎 Inspect Image",
+                                   style="secondary.Outline.TButton",
+                                   command=inspect_selected_image)
+    Tooltip(btn_inspect_image, ACTION_TOOLTIPS["inspect_image"])
+
+    btn_history_image = ttk.Button(action_frame, text="🧱 History",
+                                   style="secondary.Outline.TButton",
+                                   command=history_selected_image)
+    Tooltip(btn_history_image, ACTION_TOOLTIPS["history_image"])
+
     btn_delete_volume = ttk.Button(action_frame, text="🗑 Delete Volume",
                                    style="danger.Outline.TButton",
                                    command=delete_selected_volume)
     Tooltip(btn_delete_volume, ACTION_TOOLTIPS["delete_volume"])
+
+    btn_inspect_volume = ttk.Button(action_frame, text="🔎 Inspect Volume",
+                                    style="secondary.Outline.TButton",
+                                    command=inspect_selected_volume)
+    Tooltip(btn_inspect_volume, ACTION_TOOLTIPS["inspect_volume"])
 
     btn_run_container = ttk.Button(action_frame, text="▶ Run from Image",
                                    style="success.Outline.TButton",
@@ -993,17 +2049,88 @@ def create_selected_item_actions(action_frame, root, display_manager, refresh_im
                                 style="warning.Outline.TButton",
                                 command=stop_containers_using_image)
     Tooltip(btn_stop_using, ACTION_TOOLTIPS["stop_using_image"])
+
+    btn_delete_network = ttk.Button(action_frame, text="🗑 Delete Network",
+                                    style="danger.Outline.TButton",
+                                    command=delete_selected_network)
+    Tooltip(btn_delete_network, ACTION_TOOLTIPS["delete_network"])
+
+    btn_inspect_network = ttk.Button(action_frame, text="🔎 Inspect Network",
+                                     style="secondary.Outline.TButton",
+                                     command=inspect_selected_network)
+    Tooltip(btn_inspect_network, ACTION_TOOLTIPS["inspect_network"])
+
+    btn_connect_network = ttk.Button(action_frame, text="🔌 Connect",
+                                     style="info.Outline.TButton",
+                                     command=connect_selected_network)
+    Tooltip(btn_connect_network, ACTION_TOOLTIPS["connect_network"])
+
+    btn_disconnect_network = ttk.Button(action_frame, text="⛔ Disconnect",
+                                        style="warning.Outline.TButton",
+                                        command=disconnect_selected_network)
+    Tooltip(btn_disconnect_network, ACTION_TOOLTIPS["disconnect_network"])
+
+    btn_compose_up = ttk.Button(action_frame, text="▶ Compose Up",
+                                style="success.Outline.TButton",
+                                command=compose_up_selected)
+    Tooltip(btn_compose_up, ACTION_TOOLTIPS["compose_up"])
+
+    btn_compose_down = ttk.Button(action_frame, text="⏹ Compose Down",
+                                  style="danger.Outline.TButton",
+                                  command=compose_down_selected)
+    Tooltip(btn_compose_down, ACTION_TOOLTIPS["compose_down"])
+
+    btn_compose_restart = ttk.Button(action_frame, text="↻ Compose Restart",
+                                     style="warning.Outline.TButton",
+                                     command=compose_restart_selected)
+    Tooltip(btn_compose_restart, ACTION_TOOLTIPS["compose_restart"])
+
+    btn_compose_logs = ttk.Button(action_frame, text="📄 Compose Logs",
+                                  style="secondary.Outline.TButton",
+                                  command=compose_logs_selected)
+    Tooltip(btn_compose_logs, ACTION_TOOLTIPS["compose_logs"])
+
+    btn_compose_services = ttk.Button(action_frame, text="📋 Services",
+                                      style="info.Outline.TButton",
+                                      command=compose_services_selected)
+    Tooltip(btn_compose_services, ACTION_TOOLTIPS["compose_services"])
+
+    btn_compose_inspect = ttk.Button(action_frame, text="🔎 Compose Config",
+                                     style="secondary.Outline.TButton",
+                                     command=compose_inspect_selected)
+    Tooltip(btn_compose_inspect, ACTION_TOOLTIPS["compose_inspect"])
     
     action_buttons = {
         'start': btn_start_container,
         'stop': btn_stop_container,
+        'restart': btn_restart_container,
+        'pause': btn_pause_container,
+        'unpause': btn_unpause_container,
         'delete': btn_delete_container,
+        'rename': btn_rename_container,
         'terminal': btn_container_terminal,
         'logs': btn_view_logs,
+        'inspect_container': btn_inspect_container,
+        'commit': btn_commit_container,
         'delete_image': btn_delete_image,
+        'tag_image': btn_tag_image,
+        'save_image': btn_save_image,
+        'inspect_image': btn_inspect_image,
+        'history_image': btn_history_image,
         'delete_volume': btn_delete_volume,
+        'inspect_volume': btn_inspect_volume,
         'run': btn_run_container,
-        'stop_using': btn_stop_using
+        'stop_using': btn_stop_using,
+        'delete_network': btn_delete_network,
+        'inspect_network': btn_inspect_network,
+        'connect_network': btn_connect_network,
+        'disconnect_network': btn_disconnect_network,
+        'compose_up': btn_compose_up,
+        'compose_down': btn_compose_down,
+        'compose_restart': btn_compose_restart,
+        'compose_logs': btn_compose_logs,
+        'compose_services': btn_compose_services,
+        'compose_inspect': btn_compose_inspect,
     }
     
     return action_buttons, action_label
