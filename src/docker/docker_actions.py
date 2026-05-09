@@ -11,7 +11,8 @@ from src.docker.docker_commands_constants import (
     DOCKER_START_ALL, DOCKER_STOP_ALL, DOCKER_RESTART_ALL, 
     DOCKER_RM_ALL, DOCKER_RMI_ALL,
     DOCKER_VOLUME_PRUNE, DOCKER_VOLUME_LS_IDS, DOCKER_VOLUME_LS_DANGLING, DOCKER_VOLUME_RM_ALL,
-    DOCKER_STOP_ALL_SAFE, DOCKER_RM_ALL_SAFE, DOCKER_RMI_ALL_SAFE, DOCKER_VOLUME_RM_ALL_SAFE
+    DOCKER_STOP_ALL_SAFE, DOCKER_RM_ALL_SAFE, DOCKER_RMI_ALL_SAFE, DOCKER_VOLUME_RM_ALL_SAFE,
+    DOCKER_IMAGE_PRUNE, DOCKER_NETWORK_PRUNE
 )
 
 def check_docker_running():
@@ -130,6 +131,13 @@ def delete_all_images(show_text_output_callback, parent=None, show_loading_callb
                    show_loading_callback=show_loading_callback)
 
 
+def prune_images(show_text_output_callback, parent=None, show_loading_callback=None):
+    if not check_docker_running(): return
+    confirm_and_run("Delete dangling/unused image layers?", DOCKER_IMAGE_PRUNE,
+                   show_text_output_callback, sudo=True, parent=parent,
+                   show_loading_callback=show_loading_callback)
+
+
 # Volume actions
 def prune_volumes(show_text_output_callback, parent=None, show_loading_callback=None):
     if not check_docker_running(): return
@@ -172,6 +180,14 @@ def delete_all_volumes(show_text_output_callback, parent=None, show_loading_call
     """Delete all volumes (used and unused)"""
     if not check_docker_running(): return
     confirm_and_run("Delete ALL volumes (used and unused)?", DOCKER_VOLUME_RM_ALL,
+                   show_text_output_callback, sudo=True, parent=parent,
+                   show_loading_callback=show_loading_callback)
+
+
+def prune_networks(show_text_output_callback, parent=None, show_loading_callback=None):
+    """Delete unused Docker networks"""
+    if not check_docker_running(): return
+    confirm_and_run("Delete unused Docker networks?", DOCKER_NETWORK_PRUNE,
                    show_text_output_callback, sudo=True, parent=parent,
                    show_loading_callback=show_loading_callback)
 

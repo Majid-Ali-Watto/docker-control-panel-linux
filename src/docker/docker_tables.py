@@ -13,6 +13,7 @@ from src.docker.docker_commands_constants import (
     DOCKER_PS_RUNNING,
     DOCKER_PS_ALL,
     DOCKER_PS_STOPPED,
+    DOCKER_PS_PAUSED,
     DOCKER_PS_IDS_RUNNING,
     DOCKER_STATS_NO_STREAM,
     DOCKER_IMAGES_ALL,
@@ -21,7 +22,9 @@ from src.docker.docker_commands_constants import (
     DOCKER_PS_NAMES_ALL,
     DOCKER_INSPECT_MOUNTS,
     DOCKER_DISK_USAGE_VERBOSE,
-    DOCKER_DISK_STORAGE_SIMPLE
+    DOCKER_DISK_STORAGE_SIMPLE,
+    DOCKER_NETWORK_LS,
+    DOCKER_COMPOSE_LS,
 )
 
 
@@ -69,6 +72,21 @@ def show_stopped_containers(show_table_callback, show_loading_callback, append=F
     )
 
 
+def show_paused_containers(show_table_callback, show_loading_callback, append=False):
+    """Show paused containers"""
+    if not check_docker_running(): return
+    show_table_command(
+        DOCKER_PS_PAUSED,
+        ["CONTAINER ID", "NAMES", "IMAGE", "STATUS", "PORTS", "SIZE"],
+        sudo=False,
+        table_callback=show_table_callback,
+        loading_callback=show_loading_callback,
+        table_type='container',
+        table_title="Paused Containers",
+        append=append
+    )
+
+
 def show_containers_with_stats(show_table_callback, show_loading_callback, display_manager=None):
     """Show containers with stats (only running containers for better performance)"""
     if not check_docker_running(): return
@@ -78,20 +96,32 @@ def show_containers_with_stats(show_table_callback, show_loading_callback, displ
         import tkinter as tk
         from tkinter import ttk
         
-        # Check if refresh button already exists
-        has_refresh = False
+        refresh_btn = None
+        live_btn = None
         for widget in display_manager.action_frame.winfo_children():
             if isinstance(widget, ttk.Button) and "Refresh" in str(widget.cget("text")):
-                has_refresh = True
-                break
+                refresh_btn = widget
+            if isinstance(widget, ttk.Button) and "Live Stats" in str(widget.cget("text")):
+                live_btn = widget
         
-        if not has_refresh:
+        def refresh_stats():
+            show_containers_with_stats(show_table_callback, show_loading_callback, display_manager)
+
+        def toggle_live_stats():
+            display_manager.live_stats_enabled = not display_manager.live_stats_enabled
+            if not display_manager.live_stats_enabled:
+                display_manager.stop_live_stats()
+            refresh_stats()
+
+        if not refresh_btn:
             refresh_btn = ttk.Button(display_manager.action_frame, text="🔄 Refresh Stats")
-            
-            def refresh_stats():
-                show_containers_with_stats(show_table_callback, show_loading_callback, display_manager)
-            
             refresh_btn.config(command=refresh_stats)
+
+        if not live_btn:
+            live_btn = ttk.Button(display_manager.action_frame, text="▶ Live Stats")
+            live_btn.config(command=toggle_live_stats)
+
+        live_btn.config(text="⏹ Stop Live Stats" if display_manager.live_stats_enabled else "▶ Live Stats")
     
     # First check if there are running containers
     running = run_cmd(DOCKER_PS_IDS_RUNNING).strip()
@@ -101,6 +131,11 @@ def show_containers_with_stats(show_table_callback, show_loading_callback, displ
             ["CONTAINER ID", "NAME", "CPU %", "MEM USAGE", "MEM %", "NET I/O", "BLOCK I/O", "PIDs"],
             [], 'container_stats', "Container Stats", False
         )
+        if display_manager and display_manager.live_stats_enabled:
+            display_manager.live_stats_job = display_manager.output_container.after(
+                2000,
+                lambda: show_containers_with_stats(show_table_callback, show_loading_callback, display_manager)
+            )
         return
     
     def callback(result):
@@ -119,6 +154,17 @@ def show_containers_with_stats(show_table_callback, show_loading_callback, displ
             ["CONTAINER ID", "NAME", "CPU %", "MEM USAGE", "MEM %", "NET I/O", "BLOCK I/O", "PIDs"],
             rows, 'container_stats', "Container Stats (Running Containers Only)", False
         )
+
+        if display_manager and display_manager.live_stats_enabled:
+            if display_manager.live_stats_job:
+                try:
+                    display_manager.output_container.after_cancel(display_manager.live_stats_job)
+                except Exception:
+                    pass
+            display_manager.live_stats_job = display_manager.output_container.after(
+                2000,
+                lambda: show_containers_with_stats(show_table_callback, show_loading_callback, display_manager)
+            )
     
     # Only query running containers for faster performance
     async_run(
@@ -215,61 +261,99 @@ def show_used_images(show_table_callback, show_loading_callback, append=False):
     )
 
 
+def _collect_volume_rows(result):
+    """Collect volume rows with usage details from docker system df -v output."""
+    volume_containers = {}
+
+    containers_result = run_cmd(DOCKER_PS_NAMES_ALL).strip()
+    if containers_result:
+        container_names = containers_result.split('\n')
+        for container_name in container_names:
+            if container_name.strip():
+                mounts = run_cmd(DOCKER_INSPECT_MOUNTS.format(container_name=container_name)).strip()
+                if mounts and mounts != '[]':
+                    import json
+                    try:
+                        mount_list = json.loads(mounts)
+                        for mount in mount_list:
+                            if mount.get('Type') == 'volume':
+                                vol_name = mount.get('Name')
+                                if vol_name:
+                                    if vol_name not in volume_containers:
+                                        volume_containers[vol_name] = []
+                                    volume_containers[vol_name].append(container_name)
+                    except Exception:
+                        pass
+
+    lines = result.split('\n')
+    in_volumes = False
+    rows = []
+    for line in lines:
+        if 'Local Volumes space usage:' in line or 'VOLUME NAME' in line:
+            in_volumes = True
+            continue
+        if in_volumes and line.strip() and not line.startswith('Images'):
+            parts = line.split()
+            if len(parts) >= 3 and not line.startswith('VOLUME') and not line.startswith('Container'):
+                volume_name = parts[0]
+                links = parts[1] if len(parts) > 1 else '0'
+                size = parts[2] if len(parts) > 2 else '0B'
+
+                containers = volume_containers.get(volume_name, [])
+                used_by = ', '.join(containers) if containers else '(unused)'
+
+                rows.append([volume_name, links, size, used_by])
+        if in_volumes and ('Images space usage:' in line or 'Containers space usage:' in line or 'Build' in line):
+            break
+
+    return rows
+
+
 def show_volumes(show_table_callback, show_loading_callback):
     """Show volumes with container usage information"""
     if not check_docker_running(): return
     
     def callback(result):
-        # First, get volume to container mapping
-        volume_containers = {}
-        
-        # Get all containers and their volumes
-        containers_result = run_cmd(DOCKER_PS_NAMES_ALL).strip()
-        if containers_result:
-            container_names = containers_result.split('\n')
-            for container_name in container_names:
-                if container_name.strip():
-                    # Get volumes for this container
-                    mounts = run_cmd(DOCKER_INSPECT_MOUNTS.format(container_name=container_name)).strip()
-                    if mounts and mounts != '[]':
-                        import json
-                        try:
-                            mount_list = json.loads(mounts)
-                            for mount in mount_list:
-                                if mount.get('Type') == 'volume':
-                                    vol_name = mount.get('Name')
-                                    if vol_name:
-                                        if vol_name not in volume_containers:
-                                            volume_containers[vol_name] = []
-                                        volume_containers[vol_name].append(container_name)
-                        except:
-                            pass
-        
-        # Parse docker system df -v output for volumes
-        lines = result.split('\n')
-        in_volumes = False
-        rows = []
-        for line in lines:
-            if 'Local Volumes space usage:' in line or 'VOLUME NAME' in line:
-                in_volumes = True
-                continue
-            if in_volumes and line.strip() and not line.startswith('Images'):
-                parts = line.split()
-                if len(parts) >= 3 and not line.startswith('VOLUME') and not line.startswith('Container'):
-                    volume_name = parts[0]
-                    links = parts[1] if len(parts) > 1 else '0'
-                    size = parts[2] if len(parts) > 2 else '0B'
-                    
-                    # Get containers using this volume
-                    containers = volume_containers.get(volume_name, [])
-                    used_by = ', '.join(containers) if containers else '(unused)'
-                    
-                    rows.append([volume_name, links, size, used_by])
-            if in_volumes and ('Images space usage:' in line or 'Containers space usage:' in line or 'Build' in line):
-                break
+        rows = _collect_volume_rows(result)
         show_table_callback(["VOLUME NAME", "LINKS", "SIZE", "USED BY"], rows, 'volume', "Volumes", False)
     
     async_run(DOCKER_DISK_USAGE_VERBOSE, callback, sudo=False, sudo_password=None, 
+             loading_callback=show_loading_callback)
+
+
+def show_used_volumes(show_table_callback, show_loading_callback, append=False):
+    """Show used volumes only."""
+    if not check_docker_running(): return
+
+    def callback(result):
+        rows = [row for row in _collect_volume_rows(result) if row[3] != '(unused)']
+        show_table_callback(
+            ["VOLUME NAME", "LINKS", "SIZE", "USED BY"],
+            rows,
+            'volume',
+            "Used Volumes",
+            append
+        )
+
+    async_run(DOCKER_DISK_USAGE_VERBOSE, callback, sudo=False, sudo_password=None,
+             loading_callback=show_loading_callback)
+
+
+def show_unused_volumes(show_table_callback, show_loading_callback, append=False):
+    """Show unused volumes only."""
+    if not check_docker_running(): return
+
+    def callback(result):
+        rows = [row for row in _collect_volume_rows(result) if row[3] == '(unused)']
+        show_table_callback(
+            ["VOLUME NAME", "LINKS", "SIZE", "USED BY"],
+            rows,
+            'volume',
+            "Unused Volumes",
+            append
+        )
+
+    async_run(DOCKER_DISK_USAGE_VERBOSE, callback, sudo=False, sudo_password=None,
              loading_callback=show_loading_callback)
 
 
@@ -306,3 +390,49 @@ def show_docker_disk_storage_simple(show_table_callback, show_loading_callback):
     
     async_run(DOCKER_DISK_STORAGE_SIMPLE, callback, sudo=False, sudo_password=None, 
              loading_callback=show_loading_callback)
+
+
+def show_networks(show_table_callback, show_loading_callback):
+    """Show Docker networks"""
+    if not check_docker_running(): return
+    show_table_command(
+        DOCKER_NETWORK_LS,
+        ["NETWORK ID", "NAME", "DRIVER", "SCOPE"],
+        sudo=False,
+        table_callback=show_table_callback,
+        loading_callback=show_loading_callback,
+        table_type='network',
+        table_title="Docker Networks"
+    )
+
+
+def show_compose_projects(show_table_callback, show_loading_callback):
+    """Show Docker Compose projects"""
+    if not check_docker_running(): return
+
+    def callback(result):
+        import json
+        rows = []
+        try:
+            data = json.loads(result.strip() or "[]")
+            for item in data:
+                rows.append([
+                    item.get("Name", ""),
+                    item.get("Status", ""),
+                    item.get("ConfigFiles", ""),
+                ])
+        except (json.JSONDecodeError, TypeError):
+            pass
+
+        show_table_callback(
+            ["PROJECT", "STATUS", "CONFIG FILES"],
+            rows,
+            'compose',
+            "Compose Projects",
+            False
+        )
+
+    async_run(
+        DOCKER_COMPOSE_LS,
+        callback, sudo=False, sudo_password=None, loading_callback=show_loading_callback
+    )

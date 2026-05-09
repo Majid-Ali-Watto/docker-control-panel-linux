@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-A Python/Tkinter GUI application for managing Docker on Linux. Provides a graphical interface for containers, images, volumes, stats, and Docker service control. Requires sudo access for Docker commands.
+A Python/Tkinter GUI application for managing Docker on Linux. Provides a graphical interface for containers, images, volumes, networks, stats, Compose projects, and Docker service control. Requires sudo access for Docker commands.
 
 ## Running the Application
 
@@ -19,7 +19,8 @@ src/
 ├── config/
 │   ├── config_manager.py      # Password storage (~/.docker-gui/config.json, mode 0600)
 │   ├── config_menu.py         # Sidebar menu structure — all button wiring lives here
-│   └── config_themes.py       # Theme definitions (Default, Dark, Light Alt, Classic, Clam Light)
+│   ├── config_themes.py       # Theme definitions (Default, Dark, Light Alt, Classic, Clam Light)
+│   └── config_tooltips.py     # Tooltip strings for every sidebar and action button
 ├── docker/
 │   ├── docker_actions.py      # High-level actions (start/stop service, bulk container ops)
 │   ├── docker_commands_constants.py  # All docker CLI command strings
@@ -27,14 +28,15 @@ src/
 │   ├── docker_operations.py   # Core subprocess execution of docker commands
 │   └── docker_tables.py       # Populates Treeview tables with docker resource data
 ├── ui/
-│   ├── ui_components.py       # Reusable dialogs (password prompt, install prompt)
+│   ├── ui_components.py       # Reusable dialogs (password prompt, install prompt, Tooltip)
 │   ├── ui_display.py          # DisplayManager — switches between table/text views
 │   └── keyboard_navigation.py # Keyboard shortcuts and focus management
 ├── help/
 │   ├── help_commands.py       # Text shown in Commands tab
+│   ├── help_creator.py        # Creator name, links shown in Creator tab
 │   └── help_info.py           # Text shown in Help tab
 └── utils/
-    ├── utils.py               # Docker install/running checks
+    ├── utils.py               # Docker install/running checks, clean_subprocess_env
     └── threads.py             # Threading helpers for async docker operations
 ```
 
@@ -42,11 +44,14 @@ Entry point: `docker_gui_modular.py` — `DockerGUI` class wires everything toge
 
 ## Key Architecture Patterns
 
+- **No top header bar** — the window is split directly into sidebar (left) + main content (right). The sidebar shows the app title and Docker service status at the top.
+- **Docker info panel** — a dark banner shown below the action toolbar when the Docker category is active (`DockerGUI._create_docker_info_panel`). Hidden for all other categories.
 - **DisplayManager** (`src/ui/ui_display.py`): single object that owns the output area; call `show_table(columns, rows)` or `show_text_output(text)` — never manipulate output widgets directly.
 - **Menu wiring**: all sidebar buttons and their lambdas are defined in `src/config/config_menu.py` via `get_menu_structure()`. Add new actions there.
 - **Docker commands**: raw CLI strings live in `docker_commands_constants.py`; execution goes through `docker_operations.py`. Do not inline subprocess calls elsewhere.
 - **Threading**: long-running docker commands must use the helpers in `threads.py` to avoid blocking the Tkinter main loop.
 - **Password**: stored once in `~/.docker-gui/config.json` (0600). Read via `config_manager.py` — never prompt inline.
+- **Terminal launch**: uses `clean_subprocess_env()` from `utils.py` to strip snap-injected env vars before calling `subprocess.Popen`, preventing libpthread conflicts.
 
 ## Coding Conventions
 
@@ -64,7 +69,7 @@ Entry point: `docker_gui_modular.py` — `DockerGUI` class wires everything toge
 3. Register the button in `src/config/config_menu.py` under the correct category.
 
 **Add a new theme:**
-Add an entry to the `themes` dict in `src/config/config_themes.py` — keys: `ttk_theme`, `bg`, `text_bg`, `text_fg`, `button_active`, `button_active_fg`.
+Add an entry to the `themes` dict in `src/config/config_themes.py`.
 
 **Add a new table view:**
 Implement a `show_<resource>` function in `src/docker/docker_tables.py` following the existing pattern (query docker, parse output, call `show_table(columns, rows)`).
@@ -73,3 +78,4 @@ Implement a `show_<resource>` function in `src/docker/docker_tables.py` followin
 
 - Sudo password is stored locally with `chmod 0600`; never log or print it.
 - All docker commands are constructed from constants, not from raw user input — keep it that way to avoid shell injection.
+- `clean_subprocess_env()` must be used when launching external processes from within the app to avoid snap environment pollution.
