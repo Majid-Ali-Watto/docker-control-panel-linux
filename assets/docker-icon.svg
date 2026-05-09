@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+
+  <!-- App background -->
+  <rect width="256" height="256" rx="36" fill="#1A6FD4"/>
+
+  <!-- ── Shipping containers on the whale's back ─────────────────────── -->
+  <!-- Row 1 — two containers -->
+  <rect x="62"  y="68" width="36" height="28" rx="4" fill="white" opacity="0.95"/>
+  <line x1="62"  y1="82" x2="98"  y2="82" stroke="#1A6FD4" stroke-width="2" opacity="0.4"/>
+
+  <rect x="104" y="68" width="36" height="28" rx="4" fill="white" opacity="0.95"/>
+  <line x1="104" y1="82" x2="140" y2="82" stroke="#1A6FD4" stroke-width="2" opacity="0.4"/>
+
+  <!-- Row 2 — three containers -->
+  <rect x="40"  y="100" width="36" height="28" rx="4" fill="white" opacity="0.95"/>
+  <line x1="40"  y1="114" x2="76"  y2="114" stroke="#1A6FD4" stroke-width="2" opacity="0.4"/>
+
+  <rect x="82"  y="100" width="36" height="28" rx="4" fill="white" opacity="0.95"/>
+  <line x1="82"  y1="114" x2="118" y2="114" stroke="#1A6FD4" stroke-width="2" opacity="0.4"/>
+
+  <rect x="124" y="100" width="36" height="28" rx="4" fill="white" opacity="0.95"/>
+  <line x1="124" y1="114" x2="160" y2="114" stroke="#1A6FD4" stroke-width="2" opacity="0.4"/>
+
+  <!-- ── Whale body ──────────────────────────────────────────────────── -->
+  <path d="
+    M 30 148
+    Q 28 174  60 176
+    L 168 176
+    Q 200 176  200 156
+    Q 200 136  174 136
+    L 50  136
+    Q 28 136  30 148
+    Z"
+    fill="white"/>
+
+  <!-- Whale tail -->
+  <path d="
+    M 190 148
+    Q 224 132  220 158
+    Q 228 172  206 165
+    Z"
+    fill="white"/>
+
+  <!-- Whale eye -->
+  <circle cx="64" cy="158" r="6" fill="#1A6FD4"/>
+  <circle cx="66" cy="156" r="2" fill="white" opacity="0.5"/>
+
+  <!-- ── Water spout ─────────────────────────────────────────────────── -->
+  <path d="M 158 130 Q 166 108  156  92 Q 152  84  160  78 Q 168  84  164  96 Q 174 110  166 130"
+        fill="none" stroke="white" stroke-width="6"
+        stroke-linecap="round" stroke-linejoin="round" opacity="0.9"/>
+
+</svg>

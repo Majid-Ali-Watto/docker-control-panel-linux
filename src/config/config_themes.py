@@ -1,51 +1,81 @@
 """
-Theme configurations for Docker GUI
+Theme configurations for Docker GUI (powered by ttkbootstrap)
 """
 
+# Default theme name used on startup
+DEFAULT_THEME = "Flatly"
+
 themes = {
-    "Default": {
-        "ttk_theme": "default",
-        "bg": "#f0f0f0",
-        "fg": "#000000",
-        "button_active": "#0078d4",
-        "button_active_fg": "white",
-        "text_bg": "white",
-        "text_fg": "black"
+    "Darkly": {
+        "ttkbs_theme": "darkly",
+        "root_bg": "#222222",
+        "sidebar_bg": "#1a1a2e",
+        "header_bg": "#0d0d1a",
+        "text_bg": "#1e1e2e",
+        "text_fg": "#d4d4d4",
+        "tree_odd": "#2b2b2b",
+        "tree_even": "#232323",
+        "tree_border": "#444444",
+        "active_style": "primary.TButton",
     },
-    "Dark": {
-        "ttk_theme": "clam",
-        "bg": "#2b2b2b",
-        "fg": "#e0e0e0",
-        "button_active": "#0078d4",
-        "button_active_fg": "white",
-        "text_bg": "#1e1e1e",
-        "text_fg": "#d4d4d4"
+    "Superhero": {
+        "ttkbs_theme": "superhero",
+        "root_bg": "#2b3e50",
+        "sidebar_bg": "#1f2f3d",
+        "header_bg": "#161f29",
+        "text_bg": "#1e2a35",
+        "text_fg": "#abb6c2",
+        "tree_odd": "#2b3e50",
+        "tree_even": "#243444",
+        "tree_border": "#4a6070",
+        "active_style": "info.TButton",
     },
-    "Light (Alt)": {
-        "ttk_theme": "alt",
-        "bg": "#ffffff",
-        "fg": "#000000",
-        "button_active": "#0078d4",
-        "button_active_fg": "white",
-        "text_bg": "white",
-        "text_fg": "black"
+    "Solar": {
+        "ttkbs_theme": "solar",
+        "root_bg": "#002b36",
+        "sidebar_bg": "#001e27",
+        "header_bg": "#001218",
+        "text_bg": "#002b36",
+        "text_fg": "#839496",
+        "tree_odd": "#003340",
+        "tree_even": "#002533",
+        "tree_border": "#00404e",
+        "active_style": "warning.TButton",
     },
-    "Classic": {
-        "ttk_theme": "classic",
-        "bg": "#d9d9d9",
-        "fg": "#000000",
-        "button_active": "#4a6fa5",
-        "button_active_fg": "white",
-        "text_bg": "white",
-        "text_fg": "black"
+    "Vapor": {
+        "ttkbs_theme": "vapor",
+        "root_bg": "#1a1a2e",
+        "sidebar_bg": "#12122a",
+        "header_bg": "#0a0a1a",
+        "text_bg": "#1e1e2e",
+        "text_fg": "#cdd6f4",
+        "tree_odd": "#1e1e2e",
+        "tree_even": "#181828",
+        "tree_border": "#2e2e44",
+        "active_style": "primary.TButton",
     },
-    "Clam Light": {
-        "ttk_theme": "clam",
-        "bg": "#dcdad5",
-        "fg": "#000000",
-        "button_active": "#2d8659",
-        "button_active_fg": "white",
-        "text_bg": "white",
-        "text_fg": "black"
-    }
+    "Cosmo": {
+        "ttkbs_theme": "cosmo",
+        "root_bg": "#ffffff",
+        "sidebar_bg": "#e9ecef",
+        "header_bg": "#2196F3",
+        "text_bg": "#f8f9fa",
+        "text_fg": "#212529",
+        "tree_odd": "#ffffff",
+        "tree_even": "#f2f4f6",
+        "tree_border": "#d0d5da",
+        "active_style": "primary.TButton",
+    },
+    "Flatly": {
+        "ttkbs_theme": "flatly",
+        "root_bg": "#f9f9f9",
+        "sidebar_bg": "#ecf0f1",
+        "header_bg": "#27ae60",
+        "text_bg": "#ffffff",
+        "text_fg": "#2c3e50",
+        "tree_odd": "#ffffff",
+        "tree_even": "#f4f6f7",
+        "tree_border": "#dce1e7",
+        "active_style": "success.TButton",
+    },
 }

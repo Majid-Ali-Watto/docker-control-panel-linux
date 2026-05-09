@@ -7,10 +7,11 @@ import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
 import threading
 import subprocess
-from src.utils.utils import run_cmd, async_run, parse_fixed_width_table
+from src.utils.utils import run_cmd, async_run, parse_fixed_width_table, clean_subprocess_env
 from src.config.config_manager import get_sudo_password
+from src.config.config_tooltips import ACTION_TOOLTIPS
 from src.docker.docker_actions import check_docker_running
-from src.ui.ui_components import create_table_widget
+from src.ui.ui_components import create_table_widget, Tooltip
 from src.utils.threads import startThreadForTask
 from src.docker.docker_commands_constants import (
     DOCKER_PULL, DOCKER_RUN_DETACHED, DOCKER_INSPECT_ANCESTOR,
@@ -24,56 +25,61 @@ def pull_image_dialog(root, refresh_callback):
     
     dialog = tk.Toplevel(root)
     dialog.title("Pull Docker Image")
-    dialog.geometry("450x180")
     dialog.resizable(False, False)
     dialog.transient(root)
     dialog.grab_set()
-    
-    ttk.Label(dialog, text="Enter image name (e.g., nginx:latest, mysql:8.0):", 
-             font=("Arial", 10)).pack(pady=(20, 10))
-    
+
+    ttk.Label(dialog, text="Enter image name (e.g., nginx:latest, mysql:8.0):",
+              font=("Arial", 10)).pack(pady=(20, 10), padx=20)
+
     image_var = tk.StringVar()
     image_entry = ttk.Entry(dialog, textvariable=image_var, font=("Arial", 11), width=40)
-    image_entry.pack(pady=5)
+    image_entry.pack(pady=5, padx=20)
     image_entry.focus()
-    
-    ttk.Label(dialog, text="Leave empty for 'latest' tag", 
-             font=("Arial", 8), foreground="gray").pack(pady=2)
-    
+
+    ttk.Label(dialog, text="Leave empty for 'latest' tag",
+              font=("Arial", 8), foreground="gray").pack(pady=(0, 4))
+
     result_label = ttk.Label(dialog, text="", font=("Arial", 9))
-    result_label.pack(pady=5)
-    
+    result_label.pack(pady=6)
+
+    btn_frame = ttk.Frame(dialog)
+    btn_frame.pack(pady=(8, 20))
+    ttk.Button(btn_frame, text="Pull", command=lambda: on_pull(), width=12).pack(side=tk.LEFT, padx=5)
+    ttk.Button(btn_frame, text="Cancel", command=dialog.destroy, width=12).pack(side=tk.LEFT, padx=5)
+
+    # Auto-size to fit all widgets, then center
+    dialog.update_idletasks()
+    w = max(dialog.winfo_reqwidth() + 20, 460)
+    h = dialog.winfo_reqheight() + 16
+    x = (dialog.winfo_screenwidth() - w) // 2
+    y = (dialog.winfo_screenheight() - h) // 2
+    dialog.geometry(f"{w}x{h}+{x}+{y}")
+
     def on_pull():
         image_name = image_var.get().strip()
         if not image_name:
             messagebox.showwarning("Input Required", "Please enter an image name", parent=dialog)
             return
-        
+
         result_label.config(text="⏳ Pulling image...", foreground="orange")
         dialog.update()
-        
+
         def pull_task():
             result = run_cmd(DOCKER_PULL.format(image_name=image_name), sudo=True, sudo_password=get_sudo_password())
             dialog.after(0, lambda: on_pull_complete(result))
-        
+
         startThreadForTask(pull_task)
-        
-    
+
     def on_pull_complete(result):
         if "Downloaded" in result or "up to date" in result or "Status: Image is up to date" in result:
             result_label.config(text="✅ Image pulled successfully!", foreground="green")
             dialog.after(2000, dialog.destroy)
-            # Refresh images view
             root.after(2100, refresh_callback)
         else:
             result_label.config(text="❌ Failed to pull image", foreground="red")
             messagebox.showerror("Pull Failed", f"Failed to pull image:\n{result[:500]}", parent=dialog)
-    
-    btn_frame = ttk.Frame(dialog)
-    btn_frame.pack(pady=10)
-    ttk.Button(btn_frame, text="Pull", command=on_pull, width=12).pack(side=tk.LEFT, padx=5)
-    ttk.Button(btn_frame, text="Cancel", command=dialog.destroy, width=12).pack(side=tk.LEFT, padx=5)
-    
+
     image_entry.bind("<Return>", lambda e: on_pull())
     image_entry.bind("<Escape>", lambda e: dialog.destroy())
 
@@ -120,34 +126,42 @@ def open_container_terminal_dialog(root, display_manager):
     
     os.chmod(script_path, 0o755)
     
-    # Try different terminal emulators
+    title = f'{container_name} ({container_id[:12]})'
+
+    # Try different terminal emulators in preference order.
+    # gnome-terminal / tilix are D-Bus based and exit with code 0 immediately —
+    # that is treated as success (see wait logic below).
     terminals = [
-        # Try default Ubuntu/Debian terminal first
-        ('x-terminal-emulator', ['x-terminal-emulator', '--title', f'{container_name} ({container_id[:12]})', '-e', script_path]),
-        # XFCE Terminal - good Ctrl+Shift+C/V support
-        ('xfce4-terminal', ['xfce4-terminal', '--geometry=140x40', 
-                           '--title', f'{container_name} ({container_id[:12]})',
-                           '-e', script_path]),
-        # Tilix - modern terminal for Ubuntu/GNOME
-        ('tilix', ['tilix', '--geometry=140x40', 
-                  '--title', f'{container_name} ({container_id[:12]})',
-                  '-e', script_path]),
-        # KDE Konsole - also has Ctrl+Shift+C/V
-        ('konsole', ['konsole', '--geometry', '140x40', '-p', f'tabtitle={container_name} ({container_id[:12]})',
-                    '-e', script_path]),
+        # tilix — good modern terminal, installed on this system
+        ('tilix', ['tilix',
+                   '--title', title,
+                   '-e', script_path]),
+        # gnome-terminal (also the target of x-terminal-emulator on Ubuntu)
+        ('gnome-terminal', ['gnome-terminal',
+                            '--title', title,
+                            '--', 'bash', script_path]),
+        # x-terminal-emulator alternative invocation (xterm-style)
+        ('x-terminal-emulator', ['x-terminal-emulator',
+                                  '-title', title,
+                                  '-e', script_path]),
+        # XFCE terminal
+        ('xfce4-terminal', ['xfce4-terminal',
+                             '--title', title,
+                             '-e', script_path]),
+        # KDE Konsole
+        ('konsole', ['konsole',
+                     '-p', f'tabtitle={title}',
+                     '-e', script_path]),
         # MATE Terminal
-        ('mate-terminal', ['mate-terminal', '--geometry=140x40', 
-                          '--title', f'{container_name} ({container_id[:12]})',
-                          '-e', script_path]),
-        # gnome-terminal with completely clean environment (Ctrl+Shift+C/V works)
-        ('gnome-terminal', ['env', '-i', 'HOME=' + os.environ.get('HOME', '~'), 'PATH=/usr/bin:/bin', 
-                           'DISPLAY=' + os.environ.get('DISPLAY', ':0'), 
-                           'TERM=xterm-256color', 'gnome-terminal', '--geometry=140x40',
-                           '--title', f'{container_name} ({container_id[:12]})',
-                           '--', 'bash', script_path]),
+        ('mate-terminal', ['mate-terminal',
+                           '--title', title,
+                           '-e', script_path]),
         # Terminator
-        ('terminator', ['terminator', '-g', '140x40', '-T', f'{container_name} ({container_id[:12]})',
-                       '-x', script_path]),
+        ('terminator', ['terminator',
+                        '-T', title,
+                        '-x', script_path]),
+        # xterm fallback
+        ('xterm', ['xterm', '-title', title, '-e', script_path]),
     ]
     
     success = False
@@ -160,34 +174,41 @@ def open_container_terminal_dialog(root, display_manager):
             continue
         
         try:
-            # Launch terminal in background
+            # Launch terminal with a snap-scrubbed environment so that
+            # system GTK/GIO libraries are used instead of snap-internal ones.
             process = subprocess.Popen(
                 term_cmd,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 start_new_session=True,
-                cwd=os.path.expanduser('~')
+                cwd=os.path.expanduser('~'),
+                env=clean_subprocess_env(),
             )
             
-            # Wait briefly to check for immediate failure
+            # Wait briefly to detect immediate failures.
+            # D-Bus terminals (gnome-terminal, tilix) fork and exit with code 0
+            # almost instantly — that is success, not failure.
             try:
-                retcode = process.wait(timeout=0.3)
-                stderr = process.stderr.read().decode('utf-8', errors='ignore')
+                retcode = process.wait(timeout=0.5)
                 if retcode != 0:
+                    stderr = process.stderr.read().decode('utf-8', errors='ignore')
                     last_error = f"{term_name}: exited with code {retcode}"
                     if stderr:
                         last_error += f" - {stderr[:100]}"
                     continue
-            except subprocess.TimeoutExpired:
-                # Still running - success!
+                # retcode == 0: terminal launched (or handed off to D-Bus) cleanly
                 success = True
-                # Clean up script after a delay (terminal should have started)
+            except subprocess.TimeoutExpired:
+                # Still running after timeout — also success
+                success = True
+
+            if success:
                 def cleanup_script():
                     import time
-                    time.sleep(2)
+                    time.sleep(3)
                     try:
                         os.unlink(script_path)
-                    except:
+                    except Exception:
                         pass
                 threading.Thread(target=cleanup_script, daemon=True).start()
                 break
@@ -294,6 +315,18 @@ def view_container_logs_dialog(root, display_manager):
     timestamps_var = tk.BooleanVar(value=True)
     timestamps_check = ttk.Checkbutton(control_frame, text="Show Timestamps", variable=timestamps_var)
     timestamps_check.pack(side=tk.LEFT, padx=10)
+
+    search_frame = ttk.Frame(logs_window)
+    search_frame.pack(fill=tk.X, padx=10, pady=(0, 5))
+
+    ttk.Label(search_frame, text="Search:", font=("Arial", 10)).pack(side=tk.LEFT, padx=(0, 5))
+
+    search_var = tk.StringVar()
+    search_entry = ttk.Entry(search_frame, textvariable=search_var, width=30)
+    search_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 8))
+
+    search_count_label = ttk.Label(search_frame, text="0 matches", font=("Arial", 9))
+    search_count_label.pack(side=tk.RIGHT)
     
     # Logs text area
     logs_frame = ttk.Frame(logs_window)
@@ -308,6 +341,8 @@ def view_container_logs_dialog(root, display_manager):
     logs_scroll_x = ttk.Scrollbar(logs_frame, orient=tk.HORIZONTAL, command=logs_text.xview)
     logs_scroll_x.pack(side=tk.BOTTOM, fill=tk.X)
     logs_text.configure(yscrollcommand=logs_scroll_y.set, xscrollcommand=logs_scroll_x.set)
+    logs_text.tag_configure("search_match", background="#3f3f46", foreground="#ffffff")
+    logs_text.tag_configure("search_current", background="#facc15", foreground="#111827")
     
     # Status label
     status_label = ttk.Label(logs_window, text="", font=("Arial", 9))
@@ -318,6 +353,115 @@ def view_container_logs_dialog(root, display_manager):
     button_frame.pack(fill=tk.X, padx=10, pady=(0, 10))
     
     follow_thread = {'running': False, 'thread': None}
+    search_state = {'matches': [], 'current_index': -1}
+    search_job = {'id': None}
+
+    def update_search_count():
+        matches = len(search_state['matches'])
+        if matches == 0:
+            search_count_label.config(text="0 matches")
+        else:
+            search_count_label.config(
+                text=f"{search_state['current_index'] + 1}/{matches} matches"
+            )
+
+    def clear_search_tags():
+        logs_text.tag_remove("search_match", "1.0", tk.END)
+        logs_text.tag_remove("search_current", "1.0", tk.END)
+
+    def focus_current_match():
+        if not search_state['matches']:
+            update_search_count()
+            return
+
+        start, end = search_state['matches'][search_state['current_index']]
+        logs_text.tag_remove("search_current", "1.0", tk.END)
+        logs_text.tag_add("search_current", start, end)
+        logs_text.mark_set(tk.INSERT, start)
+        logs_text.see(start)
+        update_search_count()
+
+    def perform_log_search(*_args):
+        query = search_var.get().strip()
+        previous_match = None
+
+        if search_state['matches'] and 0 <= search_state['current_index'] < len(search_state['matches']):
+            previous_match = search_state['matches'][search_state['current_index']][0]
+
+        clear_search_tags()
+        search_state['matches'] = []
+        search_state['current_index'] = -1
+
+        if not query:
+            update_search_count()
+            return
+
+        start_pos = "1.0"
+        query_length = len(query)
+
+        while True:
+            match_start = logs_text.search(query, start_pos, stopindex=tk.END, nocase=True)
+            if not match_start:
+                break
+
+            match_end = f"{match_start}+{query_length}c"
+            search_state['matches'].append((match_start, match_end))
+            logs_text.tag_add("search_match", match_start, match_end)
+            start_pos = match_end
+
+        if not search_state['matches']:
+            update_search_count()
+            return
+
+        if previous_match:
+            for idx, (match_start, _match_end) in enumerate(search_state['matches']):
+                if match_start == previous_match:
+                    search_state['current_index'] = idx
+                    break
+
+        if search_state['current_index'] == -1:
+            search_state['current_index'] = 0
+
+        focus_current_match()
+
+    def schedule_search_refresh():
+        if search_job['id'] is not None:
+            logs_window.after_cancel(search_job['id'])
+        search_job['id'] = logs_window.after(120, _run_scheduled_search)
+
+    def _run_scheduled_search():
+        search_job['id'] = None
+        perform_log_search()
+
+    def go_to_search_match(step):
+        if not search_state['matches']:
+            perform_log_search()
+            return
+
+        search_state['current_index'] = (search_state['current_index'] + step) % len(search_state['matches'])
+        focus_current_match()
+
+    def set_logs_content(content, status_text=None, status_color=None, show_empty_message=True):
+        logs_text.config(state=tk.NORMAL)
+        logs_text.delete("1.0", tk.END)
+        if content:
+            logs_text.insert(tk.END, content)
+        elif show_empty_message:
+            logs_text.insert(tk.END, "(No logs available)")
+        logs_text.see(tk.END)
+        logs_text.config(state=tk.DISABLED)
+        schedule_search_refresh()
+
+        if status_text is not None:
+            status_label.config(text=status_text, foreground=status_color or "green")
+
+    def append_log_line(line):
+        logs_text.config(state=tk.NORMAL)
+        logs_text.insert(tk.END, line)
+        logs_text.see(tk.END)
+        logs_text.config(state=tk.DISABLED)
+        if search_var.get().strip():
+            schedule_search_refresh()
     
     def fetch_logs():
         lines = lines_var.get().strip()
@@ -335,17 +479,15 @@ def view_container_logs_dialog(root, display_manager):
         def fetch_task():
             result = run_cmd(f"docker logs {timestamps_flag} --tail {lines} {container_id}", 
                            sudo=True, sudo_password=get_sudo_password())
-            
-            logs_text.config(state=tk.NORMAL)
-            logs_text.delete(1.0, tk.END)
-            if result:
-                logs_text.insert(tk.END, result)
-            else:
-                logs_text.insert(tk.END, "(No logs available)")
-            logs_text.see(tk.END)
-            logs_text.config(state=tk.DISABLED)
-            
-            status_label.config(text=f"✓ Logs loaded ({lines} lines)", foreground="green")
+
+            logs_window.after(
+                0,
+                lambda: set_logs_content(
+                    result,
+                    status_text=f"✓ Logs loaded ({lines} lines)",
+                    status_color="green",
+                ),
+            )
         
         startThreadForTask(fetch_task)
         
@@ -375,25 +517,20 @@ def view_container_logs_dialog(root, display_manager):
             process.stdin.write(f"{get_sudo_password()}\n")
             process.stdin.flush()
             
-            logs_text.config(state=tk.NORMAL)
-            logs_text.delete(1.0, tk.END)
-            logs_text.config(state=tk.DISABLED)
+            logs_window.after(0, lambda: set_logs_content("", show_empty_message=False))
             
             try:
                 for line in iter(process.stdout.readline, ''):
                     if not follow_thread['running']:
                         process.kill()
                         break
-                    
-                    logs_text.config(state=tk.NORMAL)
-                    logs_text.insert(tk.END, line)
-                    logs_text.see(tk.END)
-                    logs_text.config(state=tk.DISABLED)
+
+                    logs_window.after(0, lambda value=line: append_log_line(value))
             except:
                 pass
             
             process.kill()
-            status_label.config(text="✓ Stopped following logs", foreground="gray")
+            logs_window.after(0, lambda: status_label.config(text="✓ Stopped following logs", foreground="gray"))
         
         follow_thread['thread'] = threading.Thread(target=follow_task, daemon=True)
         follow_thread['thread'].start()
@@ -416,7 +553,12 @@ def view_container_logs_dialog(root, display_manager):
         logs_text.config(state=tk.NORMAL)
         logs_text.delete(1.0, tk.END)
         logs_text.config(state=tk.DISABLED)
+        schedule_search_refresh()
         status_label.config(text="Logs cleared", foreground="gray")
+
+    def clear_search():
+        search_var.set("")
+        perform_log_search()
     
     def save_logs():
         filename = filedialog.asksaveasfilename(
@@ -436,11 +578,22 @@ def view_container_logs_dialog(root, display_manager):
     refresh_btn = ttk.Button(button_frame, text="🔄 Refresh", command=fetch_logs, width=15)
     refresh_btn.pack(side=tk.LEFT, padx=5)
     
+    ttk.Button(search_frame, text="◀ Prev", command=lambda: go_to_search_match(-1), width=10).pack(side=tk.RIGHT, padx=(8, 0))
+    ttk.Button(search_frame, text="Next ▶", command=lambda: go_to_search_match(1), width=10).pack(side=tk.RIGHT, padx=(8, 0))
+    ttk.Button(search_frame, text="Clear Search", command=clear_search, width=12).pack(side=tk.RIGHT)
+
     ttk.Button(button_frame, text="📡 Follow/Stop", command=toggle_follow, width=15).pack(side=tk.LEFT, padx=5)
     ttk.Button(button_frame, text="💾 Save to File", command=save_logs, width=15).pack(side=tk.LEFT, padx=5)
     ttk.Button(button_frame, text="🗑 Clear", command=clear_logs, width=15).pack(side=tk.LEFT, padx=5)
     ttk.Button(button_frame, text="Close", command=lambda: (stop_follow(), logs_window.destroy()), 
               width=15).pack(side=tk.RIGHT, padx=5)
+
+    search_entry.bind("<KeyRelease>", perform_log_search)
+    search_entry.bind("<Return>", lambda e: go_to_search_match(1))
+    search_entry.bind("<Shift-Return>", lambda e: go_to_search_match(-1))
+    logs_window.bind("<Control-f>", lambda e: search_entry.focus_set() or "break")
+    logs_window.bind("<F3>", lambda e: go_to_search_match(1) or "break")
+    logs_window.bind("<Shift-F3>", lambda e: go_to_search_match(-1) or "break")
     
     fetch_logs()
     logs_window.protocol("WM_DELETE_WINDOW", lambda: (stop_follow(), logs_window.destroy()))
@@ -793,27 +946,53 @@ def create_selected_item_actions(action_frame, root, display_manager, refresh_im
             run_docker_cmd(f"docker stop {' '.join(all_containers)}", sudo=True, 
                           sudo_password=get_sudo_password(), callback=display_manager.show_text_output)
     
-    action_label = ttk.Label(action_frame, text="Selected Item Actions:", 
+    action_label = ttk.Label(action_frame, text="Actions on selected:",
                             font=("JetBrains Mono", 9, "bold"))
-    
-    btn_start_container = ttk.Button(action_frame, text="▶ Start Container", 
+
+    btn_start_container = ttk.Button(action_frame, text="▶ Start",
+                                     style="success.Outline.TButton",
                                      command=start_selected_container)
-    btn_stop_container = ttk.Button(action_frame, text="⏸ Stop Container", 
+    Tooltip(btn_start_container, ACTION_TOOLTIPS["start_container"])
+
+    btn_stop_container = ttk.Button(action_frame, text="⏸ Stop",
+                                    style="warning.Outline.TButton",
                                     command=stop_selected_container)
-    btn_delete_container = ttk.Button(action_frame, text="🗑 Delete Container", 
+    Tooltip(btn_stop_container, ACTION_TOOLTIPS["stop_container"])
+
+    btn_delete_container = ttk.Button(action_frame, text="🗑 Delete",
+                                      style="danger.Outline.TButton",
                                       command=delete_selected_container)
-    btn_container_terminal = ttk.Button(action_frame, text="💻 Open Terminal", 
-                                       command=lambda: open_container_terminal_dialog(root, display_manager))
-    btn_view_logs = ttk.Button(action_frame, text="📄 View Logs", 
+    Tooltip(btn_delete_container, ACTION_TOOLTIPS["delete_container"])
+
+    btn_container_terminal = ttk.Button(action_frame, text="💻 Terminal",
+                                        style="info.Outline.TButton",
+                                        command=lambda: open_container_terminal_dialog(root, display_manager))
+    Tooltip(btn_container_terminal, ACTION_TOOLTIPS["container_terminal"])
+
+    btn_view_logs = ttk.Button(action_frame, text="📄 Logs",
+                               style="secondary.Outline.TButton",
                                command=lambda: view_container_logs_dialog(root, display_manager))
-    btn_delete_image = ttk.Button(action_frame, text="🗑 Delete Image", 
+    Tooltip(btn_view_logs, ACTION_TOOLTIPS["view_logs"])
+
+    btn_delete_image = ttk.Button(action_frame, text="🗑 Delete Image",
+                                  style="danger.Outline.TButton",
                                   command=delete_selected_image)
-    btn_delete_volume = ttk.Button(action_frame, text="🗑 Delete Volume", 
+    Tooltip(btn_delete_image, ACTION_TOOLTIPS["delete_image"])
+
+    btn_delete_volume = ttk.Button(action_frame, text="🗑 Delete Volume",
+                                   style="danger.Outline.TButton",
                                    command=delete_selected_volume)
-    btn_run_container = ttk.Button(action_frame, text="▶ Run Container from Image", 
+    Tooltip(btn_delete_volume, ACTION_TOOLTIPS["delete_volume"])
+
+    btn_run_container = ttk.Button(action_frame, text="▶ Run from Image",
+                                   style="success.Outline.TButton",
                                    command=run_container_from_image)
-    btn_stop_using = ttk.Button(action_frame, text="⏸ Stop Containers Using Image", 
+    Tooltip(btn_run_container, ACTION_TOOLTIPS["run_container"])
+
+    btn_stop_using = ttk.Button(action_frame, text="⏸ Stop Using Image",
+                                style="warning.Outline.TButton",
                                 command=stop_containers_using_image)
+    Tooltip(btn_stop_using, ACTION_TOOLTIPS["stop_using_image"])
     
     action_buttons = {
         'start': btn_start_container,

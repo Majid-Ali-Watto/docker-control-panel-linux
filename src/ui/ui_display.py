@@ -62,7 +62,8 @@ class DisplayManager:
                 row_text = ' '.join(str(val).lower() for val in row)
                 if query == '' or query in row_text:
                     row_with_sno = [idx] + list(row)
-                    table_widget.insert("", tk.END, values=row_with_sno)
+                    tag = 'evenrow' if idx % 2 == 0 else 'oddrow'
+                    table_widget.insert("", tk.END, values=row_with_sno, tags=(tag,))
                     idx += 1
     
     def update_action_buttons(self):
@@ -125,15 +126,23 @@ class DisplayManager:
                 self.search_entry.pack(side=tk.LEFT, fill=tk.X, expand=True)
                 self.search_entry.bind('<KeyRelease>', self.perform_search)
             
-            # Add table title if provided
+            # Add table title + count badge on the same row
             if table_title:
                 title_frame = ttk.Frame(self.output_container)
                 title_frame.pack(fill=tk.X, padx=10, pady=(5, 5))
-                
-                title_label = ttk.Label(title_frame, text=table_title, 
-                                       font=("Arial", 12, "bold"), 
-                                       foreground="#0066cc")
-                title_label.pack(anchor=tk.W)
+
+                ttk.Label(title_frame, text=table_title,
+                          font=("Arial", 12, "bold"),
+                          foreground="#0066cc").pack(side=tk.LEFT, anchor=tk.W)
+
+                _noun = {'container': 'container', 'container_stats': 'container',
+                         'image': 'image', 'volume': 'volume'}.get(table_type, 'item')
+                _count = len(rows)
+                _badge_text = f"  {_count} {_noun}{'s' if _count != 1 else ''}  "
+                tk.Label(title_frame, text=_badge_text,
+                         font=("Arial", 9, "bold"),
+                         bg="#2563eb", fg="#ffffff",
+                         relief="flat", padx=4, pady=2).pack(side=tk.LEFT, padx=(10, 0), anchor=tk.W)
         
         self.table_frame.pack(fill=tk.BOTH, expand=True)
         
@@ -153,7 +162,8 @@ class DisplayManager:
         self.clear_table()
         for idx, row in enumerate(rows, start=1):
             row_with_sno = [idx] + list(row)
-            self.table_widget.insert("", tk.END, values=row_with_sno)
+            tag = 'evenrow' if idx % 2 == 0 else 'oddrow'
+            self.table_widget.insert("", tk.END, values=row_with_sno, tags=(tag,))
         
         # Store table data for search functionality
         self.all_tables_data.append((self.table_widget, rows, columns))
