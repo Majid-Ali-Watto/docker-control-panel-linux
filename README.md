@@ -7,21 +7,22 @@ A graphical Docker manager for Linux — control containers, images, volumes, ne
 | Category | What you can do |
 |---|---|
 | 🐳 **Docker** | Start / stop / restart the Docker service, bulk-clean all resources |
-| 📦 **Containers** | View, start, stop, restart, pause, rename, inspect, commit, delete |
-| 🖼 **Images** | Pull, build, load, save, tag, inspect, run, prune, delete |
+| 📦 **Containers** | View, start, stop, restart, pause, rename, inspect, commit, delete, file browser |
+| 🖼 **Images** | Pull, push, search Docker Hub, build, load, save, tag, inspect, run, prune, delete |
 | 💾 **Volumes** | View, create, inspect, prune, delete used/unused/all |
 | 🕸 **Networks** | View, create, inspect, connect, disconnect, prune |
 | 🧩 **Compose** | List projects, bring up from file, down, restart, logs, config |
 | 📊 **Stats** | Live container resource usage, detailed disk-usage breakdown |
-| 💻 **Terminal** | Interactive shell inside any container |
-| 📄 **Logs** | View and follow container logs in real time |
+| 💻 **Terminal** | Interactive shell inside any running container (SUDO_ASKPASS, state-checked) |
+| 📄 **Logs** | View and follow container logs with optional timestamps |
 
 Other highlights:
 - **Search** — filter any table by typing
 - **Right-click** — copy cell values or entire rows
-- **Themes** — multiple persisted themes (Default, Dark, Light Alt, Classic, Clam Light)
+- **Themes** — six persisted ttkbootstrap themes (Darkly, Superhero, Solar, Vapor, Cosmo, Flatly)
 - **Password manager** — sudo password stored securely in `~/.docker-gui/config.json` (0600)
 - **Sidebar status** — Docker Running ✅ / Stopped ❌ always visible
+- **Active category indicator** — theme-coloured accent strip on the active sidebar button
 
 ## Requirements
 
@@ -94,6 +95,16 @@ docker-ui-modular/
 - Sudo password stored at `~/.docker-gui/config.json` with `chmod 0600`.
 - All docker commands built from constants — user input is never interpolated into shell strings.
 - Password is never logged or printed.
+- All `run_cmd` calls pass `sudo=True, sudo_password=get_sudo_password()` so every docker command runs under sudo consistently.
+- Terminal launch uses a SUDO_ASKPASS helper script (chmod 0700, cleaned up after use) so sudo does not consume the interactive shell's stdin.
+
+## Tests
+
+```bash
+python3 -m pytest tests/ -v
+```
+
+Unit tests live in `tests/test_buttons.py` and cover all 72 constants in `docker_commands_constants.py` plus GUI action wiring. Tests use `unittest.mock` — no real Docker daemon is required.
 
 ## Uninstall
 

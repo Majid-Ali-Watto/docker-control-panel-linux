@@ -3,6 +3,8 @@ Docker Commands Constants
 Centralized location for all Docker CLI commands used in the application.
 """
 
+# 72 command templates for various Docker operations, categorized by functionality.
+
 # System commands
 DOCKER_DISK_STORAGE_SIMPLE = "docker system df"
 DOCKER_DISK_USAGE_VERBOSE = "docker system df -v"

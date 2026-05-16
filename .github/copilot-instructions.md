@@ -56,6 +56,25 @@ Docker Control Panel — a Python/Tkinter desktop GUI for managing Docker on Lin
 - Never log or print the sudo password. Store/read it only via `config_manager.py`.
 - Build docker command strings from constants — never concatenate raw user input into shell commands.
 - Use `clean_subprocess_env()` from `utils.py` when spawning external processes (terminals, etc.).
+- **Always pass `sudo=True, sudo_password=get_sudo_password()` to every `run_cmd` call** — omitting sudo causes silent failures when the user is not in the `docker` group.
+- For interactive container terminals use a SUDO_ASKPASS helper script (`chmod 0700`) and `sudo -A` so stdin stays available for the shell.
+
+## Adding a New Theme
+
+Add an entry to `themes` in `src/config/config_themes.py` with **all** required keys:
+`ttkbs_theme`, `root_bg`, `sidebar_bg`, `header_bg`, `text_bg`, `text_fg`,
+`link_fg`, `tree_odd`, `tree_even`, `tree_border`, `active_style`, `indicator_color`.
+
+- `active_style`: a ttkbootstrap button style string (e.g. `"success.TButton"`) applied to the active sidebar button.
+- `indicator_color`: hex colour of the 4-px accent strip beside the active sidebar button.
+
+## Tests
+
+```bash
+python3 -m pytest tests/ -v
+```
+
+All 72 docker command constants are covered in `tests/test_buttons.py` using `unittest.mock` — no live Docker daemon required.
 
 ## Patterns to Follow
 

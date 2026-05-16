@@ -18,6 +18,7 @@ themes = {
         "tree_even": "#232323",
         "tree_border": "#444444",
         "active_style": "primary.TButton",
+        "indicator_color": "#4ea8f7",
     },
     "Superhero": {
         "ttkbs_theme": "superhero",
@@ -31,6 +32,7 @@ themes = {
         "tree_even": "#243444",
         "tree_border": "#4a6070",
         "active_style": "info.TButton",
+        "indicator_color": "#3498db",
     },
     "Solar": {
         "ttkbs_theme": "solar",
@@ -44,6 +46,7 @@ themes = {
         "tree_even": "#002533",
         "tree_border": "#00404e",
         "active_style": "warning.TButton",
+        "indicator_color": "#f39c12",
     },
     "Vapor": {
         "ttkbs_theme": "vapor",
@@ -57,6 +60,7 @@ themes = {
         "tree_even": "#181828",
         "tree_border": "#2e2e44",
         "active_style": "primary.TButton",
+        "indicator_color": "#bd93f9",
     },
     "Cosmo": {
         "ttkbs_theme": "cosmo",
@@ -70,6 +74,7 @@ themes = {
         "tree_even": "#f2f4f6",
         "tree_border": "#d0d5da",
         "active_style": "primary.TButton",
+        "indicator_color": "#2196F3",
     },
     "Flatly": {
         "ttkbs_theme": "flatly",
@@ -83,5 +88,6 @@ themes = {
         "tree_even": "#f4f6f7",
         "tree_border": "#dce1e7",
         "active_style": "success.TButton",
+        "indicator_color": "#27ae60",
     },
 }

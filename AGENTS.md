@@ -105,11 +105,26 @@ def show_my_resource(show_table_fn, show_loading_fn):
 ### New theme
 
 Add an entry to `themes` in `src/config/config_themes.py` with keys:
-`ttkbs_theme`, `bg`, `root_bg`, `sidebar_bg`, `header_bg`, `text_bg`, `text_fg`,
-`link_fg`, `tree_odd`, `tree_even`, `tree_border`.
+`ttkbs_theme`, `root_bg`, `sidebar_bg`, `header_bg`, `text_bg`, `text_fg`,
+`link_fg`, `tree_odd`, `tree_even`, `tree_border`, `active_style`, `indicator_color`.
+
+`active_style` is a ttkbootstrap button style (e.g. `"success.TButton"`) applied to the active sidebar button.
+`indicator_color` is the hex colour of the 4-px accent strip drawn next to that button.
 
 ## Security Constraints
 
 - Sudo password is stored in `~/.docker-gui/config.json` with mode `0600`.
 - All docker commands are built from constant templates — never interpolate unsanitised user input.
 - Do not introduce `shell=True` subprocess calls with user-controlled strings.
+- **Every `run_cmd` call must pass `sudo=True, sudo_password=get_sudo_password()`** — omitting sudo causes silent permission failures when the user is not in the `docker` group.
+- Terminal launch must use a SUDO_ASKPASS helper (temp script, chmod 0700) and `sudo -A` so the interactive shell's stdin is not consumed by the password prompt.
+
+## Tests
+
+Tests live in `tests/test_buttons.py`. Run with:
+
+```bash
+python3 -m pytest tests/ -v
+```
+
+No real Docker daemon is needed — all docker calls are mocked with `unittest.mock.patch`.

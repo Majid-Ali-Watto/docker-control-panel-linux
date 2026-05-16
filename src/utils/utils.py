@@ -65,7 +65,7 @@ def check_docker_installed():
             text=True
         )
         return result.returncode == 0
-    except:
+    except Exception:
         return False
 
 
