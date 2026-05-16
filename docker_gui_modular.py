@@ -151,6 +151,9 @@ class DockerGUI:
         self.active_sidebar_button = None
         self.active_button = None
         self.sidebar_buttons = {}
+        self.sidebar_indicators = {}
+        self.sidebar_row_frames = {}
+        self.active_category = None
         self.category_buttons = {}
         self.active_sidebar_button_ref = {'button': None}
         
@@ -342,14 +345,27 @@ class DockerGUI:
             "Terminal": "🖥",
             "Stats": "📊",
         }
+        theme = themes[self.current_theme]
         for category in menu_structure.keys():
             icon = icons.get(category, "•")
+
+            # Row frame holds the accent indicator + the button side-by-side
+            row_frame = tk.Frame(sidebar, bg=theme["sidebar_bg"])
+            row_frame.pack(pady=2, padx=10, fill=tk.X)
+
+            # Left accent strip — always present, color shows active state
+            indicator = tk.Frame(row_frame, width=4, bg=theme["sidebar_bg"])
+            indicator.pack(side=tk.LEFT, fill=tk.Y)
+
             btn = ttk.Button(
-                sidebar, text=f"  {icon}  {category}",
-                command=self.make_sidebar_command(category), width=22
+                row_frame, text=f"  {icon}  {category}",
+                command=self.make_sidebar_command(category),
             )
-            btn.pack(pady=3, padx=10, fill=tk.X)
+            btn.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(4, 0))
+
             self.sidebar_buttons[category] = btn
+            self.sidebar_indicators[category] = indicator
+            self.sidebar_row_frames[category] = row_frame
             if category in SIDEBAR_TOOLTIPS:
                 Tooltip(btn, SIDEBAR_TOOLTIPS[category])
         
@@ -846,6 +862,16 @@ class DockerGUI:
                     child.configure(bg=theme["sidebar_bg"])
                 elif isinstance(child, tk.Label):
                     child.configure(bg=theme["sidebar_bg"])
+
+        # Repaint sidebar row frames and accent indicators for the new theme
+        for cat in self.sidebar_buttons:
+            if cat in self.sidebar_row_frames and self.sidebar_row_frames[cat].winfo_exists():
+                self.sidebar_row_frames[cat].configure(bg=theme["sidebar_bg"])
+            if cat in self.sidebar_indicators and self.sidebar_indicators[cat].winfo_exists():
+                is_active = (cat == self.active_category)
+                self.sidebar_indicators[cat].configure(
+                    bg=theme["indicator_color"] if is_active else theme["sidebar_bg"]
+                )
         if hasattr(self, 'sidebar_status_label') and self.sidebar_status_label.winfo_exists():
             self.sidebar_status_label.configure(bg=theme["sidebar_bg"])
         
@@ -878,27 +904,32 @@ class DockerGUI:
         # Reapply cell-border / grid-line treeview styling for new theme
         self._configure_treeview_grid(theme)
         
-        # Reapply active button highlights
+        # Reapply active button highlights using the new theme's style
         if self.active_button and self.active_button.winfo_exists():
-            self.active_button.configure(style='primary.TButton')
+            self.active_button.configure(style=theme["active_style"])
         if self.active_sidebar_button and self.active_sidebar_button.winfo_exists():
-            self.active_sidebar_button.configure(style='primary.TButton')
+            self.active_sidebar_button.configure(style=theme["active_style"])
 
         save_selected_theme(theme_name)
     
     def make_sidebar_command(self, category):
         """Create sidebar button command"""
         def wrapper():
-            # Reset all sidebar button styles
-            for btn in self.sidebar_buttons.values():
+            theme = themes[self.current_theme]
+            # Reset all sidebar buttons and indicators
+            for cat, btn in self.sidebar_buttons.items():
                 btn.configure(style='TButton')
-            
-            # Highlight current sidebar button
+                if cat in self.sidebar_indicators:
+                    self.sidebar_indicators[cat].configure(bg=theme["sidebar_bg"])
+
+            # Highlight the selected button with fill style + left accent strip
             if category in self.sidebar_buttons:
-                self.sidebar_buttons[category].configure(style='primary.TButton')
+                self.sidebar_buttons[category].configure(style=theme["active_style"])
+                self.sidebar_indicators[category].configure(bg=theme["indicator_color"])
                 self.active_sidebar_button = self.sidebar_buttons[category]
                 self.active_sidebar_button_ref['button'] = self.active_sidebar_button
-            
+                self.active_category = category
+
             # Show category buttons
             self.show_category_buttons(category)
         return wrapper
@@ -1016,9 +1047,13 @@ class DockerGUI:
     def select_initial_category(self):
         """Select Docker category on startup"""
         if "Docker" in self.sidebar_buttons:
-            self.sidebar_buttons["Docker"].configure(style='primary.TButton')
+            theme = themes[self.current_theme]
+            self.sidebar_buttons["Docker"].configure(style=theme["active_style"])
+            if "Docker" in self.sidebar_indicators:
+                self.sidebar_indicators["Docker"].configure(bg=theme["indicator_color"])
             self.active_sidebar_button = self.sidebar_buttons["Docker"]
             self.active_sidebar_button_ref['button'] = self.active_sidebar_button
+            self.active_category = "Docker"
         self.show_category_buttons("Docker")
         # Ensure help panel is visible for Docker category
         self.help_panel.pack(side=tk.RIGHT, fill=tk.Y, padx=(8, 0))

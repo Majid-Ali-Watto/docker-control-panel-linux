@@ -49,7 +49,7 @@ def start_docker_service(root, status_var, show_loading_callback, show_text_outp
         # Wait a bit and then update status
         import time
         time.sleep(1)
-        root.after(0, lambda: update_docker_status(root, status_var))
+        root.after(0, lambda: root.winfo_exists() and update_docker_status(root, status_var))
     startThreadForTask(task)
     
 
@@ -65,7 +65,7 @@ def stop_docker_service(root, status_var, show_loading_callback, show_text_outpu
         # Wait a bit and then update status
         import time
         time.sleep(1)
-        root.after(0, lambda: update_docker_status(root, status_var))
+        root.after(0, lambda: root.winfo_exists() and update_docker_status(root, status_var))
     startThreadForTask(task)
     
 
@@ -81,7 +81,7 @@ def restart_docker_service(root, status_var, show_loading_callback, show_text_ou
         # Wait a bit and then update status
         import time
         time.sleep(2)
-        root.after(0, lambda: update_docker_status(root, status_var))
+        root.after(0, lambda: root.winfo_exists() and update_docker_status(root, status_var))
     startThreadForTask(task)
     
 
@@ -156,8 +156,9 @@ def delete_used_volumes(show_text_output_callback, parent=None, show_loading_cal
         def task():
             if show_loading_callback:
                 show_loading_callback(True)
-            all_volumes = run_cmd(DOCKER_VOLUME_LS_IDS).strip().split('\n')
-            unused_result = run_cmd(DOCKER_VOLUME_LS_DANGLING).strip()
+            sudo_pw = get_sudo_password()
+            all_volumes = run_cmd(DOCKER_VOLUME_LS_IDS, sudo=True, sudo_password=sudo_pw).strip().split('\n')
+            unused_result = run_cmd(DOCKER_VOLUME_LS_DANGLING, sudo=True, sudo_password=sudo_pw).strip()
             unused_volumes = set(unused_result.split('\n')) if unused_result else set()
             used_volumes = [v for v in all_volumes if v and v not in unused_volumes]
 

@@ -116,6 +116,13 @@ def _refresh_stream_window(session):
     else:
         cancel_btn.config(state=tk.DISABLED)
 
+    retry_btn = session.get('retry_btn')
+    if retry_btn and retry_btn.winfo_exists():
+        if session.get('status') in ('failed', 'warning'):
+            retry_btn.pack(side=tk.RIGHT, padx=(0, 12))
+        else:
+            retry_btn.pack_forget()
+
 
 def _close_stream_window(session):
     """Close the current stream window without cancelling the session."""
@@ -186,6 +193,7 @@ def _show_stream_session_window(root, session):
     cancel_btn.pack(side=tk.RIGHT, padx=(0, 12))
     close_btn = ttk.Button(footer, text="Close", width=12)
     close_btn.pack(side=tk.RIGHT, padx=(0, 12))
+    retry_btn = ttk.Button(footer, text="Retry Build", width=12, style="warning.TButton")
 
     def on_cancel():
         if session.get('status') != 'running' or not session.get('controller'):
@@ -196,15 +204,21 @@ def _show_stream_session_window(root, session):
             session['status'] = 'cancelling'
             _refresh_stream_window(session)
 
-    close_btn.config(command=lambda: _close_stream_window(session))
+    def on_retry():
+        retry_cb = session.get('retry_callback')
+        if retry_cb:
+            retry_cb()
 
+    close_btn.config(command=lambda: _close_stream_window(session))
     cancel_btn.config(command=on_cancel)
+    retry_btn.config(command=on_retry)
     window.protocol("WM_DELETE_WINDOW", lambda: _close_stream_window(session))
 
     session['window'] = window
     session['status_var'] = status_var
     session['output_text'] = output_text
     session['cancel_btn'] = cancel_btn
+    session['retry_btn'] = retry_btn
     _refresh_stream_window(session)
 
     return window
@@ -238,6 +252,7 @@ def _start_stream_session(root, title, command, sudo=False, sudo_password=None, 
         'status_var': None,
         'output_text': None,
         'cancel_btn': None,
+        'retry_btn': None,
     }
 
     def append_output(line):
@@ -274,15 +289,26 @@ def _start_stream_session(root, title, command, sudo=False, sudo_password=None, 
                 session['output_lines'].append(f"Command failed with exit code {return_code}.\n")
         _refresh_stream_window(session)
 
-    session['controller'] = stream_docker_cmd(
-        command,
-        sudo=sudo,
-        sudo_password=sudo_password,
-        output_callback=lambda line: root.after(0, lambda value=line: append_output(value)),
-        complete_callback=lambda output, code, was_cancelled: root.after(
-            0, lambda: mark_complete(output, code, was_cancelled)
-        ),
-    )
+    def _start_stream():
+        session['controller'] = stream_docker_cmd(
+            command,
+            sudo=sudo,
+            sudo_password=sudo_password,
+            output_callback=lambda line: root.after(0, lambda value=line: append_output(value)),
+            complete_callback=lambda output, code, was_cancelled: root.after(
+                0, lambda: mark_complete(output, code, was_cancelled)
+            ),
+        )
+
+    def _retry_session():
+        session['status'] = 'running'
+        session['return_code'] = None
+        session['output_lines'] = []
+        _refresh_stream_window(session)
+        _start_stream()
+
+    session['retry_callback'] = _retry_session
+    _start_stream()
 
     return session
 
@@ -500,7 +526,10 @@ def search_hub_dialog(root, refresh_callback=None):
         dialog.update()
 
         def search_task():
-            result = run_cmd(DOCKER_SEARCH.format(term=_quote(term)))
+            result = run_cmd(
+                DOCKER_SEARCH.format(term=_quote(term)),
+                sudo=True, sudo_password=get_sudo_password(),
+            )
             dialog.after(0, lambda: on_search_complete(result, term))
 
         startThreadForTask(search_task)
@@ -514,7 +543,10 @@ def search_hub_dialog(root, refresh_callback=None):
                 rows.append(parts[:4])
 
         if not rows:
-            status_label.config(text=f"No results found for '{term}'", foreground="gray")
+            if result.strip() and any(w in result.lower() for w in ('error', 'permission', 'denied', 'failed', 'cannot')):
+                status_label.config(text=f"Search error: {result.strip()[:120]}", foreground="red")
+            else:
+                status_label.config(text=f"No results found for '{term}'", foreground="gray")
             return
 
         for i, row in enumerate(rows):
@@ -994,7 +1026,7 @@ def browse_container_files_dialog(root, display_manager):
         dialog.update()
 
         def task():
-            result = run_cmd(f"docker exec {container_id} ls -la {_quote(path)}")
+            result = run_cmd(f"docker exec {container_id} ls -la {_quote(path)}", sudo=True, sudo_password=get_sudo_password())
             dialog.after(0, lambda: _on_loaded(result, path))
 
         startThreadForTask(task)
@@ -1060,7 +1092,7 @@ def browse_container_files_dialog(root, display_manager):
         dialog.update()
 
         def task():
-            result = run_cmd(f"docker cp {container_id}:{_quote(src_path)} {_quote(local_dest)}")
+            result = run_cmd(f"docker cp {container_id}:{_quote(src_path)} {_quote(local_dest)}", sudo=True, sudo_password=get_sudo_password())
             msg = (f"✅ Saved → {local_dest}" if not result.strip() or result.strip().lower().startswith('successfully')
                    else f"❌ {result[:120]}")
             dialog.after(0, lambda: status_var.set(msg))
@@ -1077,7 +1109,7 @@ def browse_container_files_dialog(root, display_manager):
         dialog.update()
 
         def task():
-            result = run_cmd(f"docker cp {_quote(src)} {container_id}:{_quote(dest_path)}")
+            result = run_cmd(f"docker cp {_quote(src)} {container_id}:{_quote(dest_path)}", sudo=True, sudo_password=get_sudo_password())
             dialog.after(0, lambda: (_load_path(current_path[0])
                                      if not result.strip() or result.strip().lower().startswith('successfully')
                                      else status_var.set(f"❌ {result[:120]}")))
@@ -1118,31 +1150,82 @@ def open_container_terminal_dialog(root, display_manager):
     values = display_manager.get_item_values(selection[0])
     container_id = values[1]
     container_name = values[2]
-    
+
     # Directly open external terminal
     import subprocess
     import shutil
     import tempfile
     import os
-    
-    # Command to run in container
-    docker_cmd = f'docker exec -it {container_id} /bin/sh || docker exec -it {container_id} /bin/bash'
-    
+
+    sudo_pw = get_sudo_password()
+
+    # Verify the container can accept exec before launching the terminal.
+    # Restarting containers appear in the Running list (docker ps shows them as
+    # "Up … (Restarting)") but docker exec will fail until the process is stable.
+    state = run_cmd(
+        f"docker inspect --format='{{{{.State.Status}}}}' {_quote(container_id)}",
+        sudo=True, sudo_password=sudo_pw,
+    ).strip().strip("'")
+    if state != 'running':
+        messages = {
+            'restarting': (
+                f"'{container_name}' is currently restarting.\n\n"
+                "It will appear in the running list while it restarts, but a terminal\n"
+                "cannot be opened until the container has fully started.\n\n"
+                "Wait a few seconds, then try Terminal again."
+            ),
+            'paused': (
+                f"'{container_name}' is paused.\n\nUnpause it first, then try Terminal again."
+            ),
+            'exited': (
+                f"'{container_name}' has stopped.\n\nStart it first, then try Terminal again."
+            ),
+            'dead': (
+                f"'{container_name}' is in a dead state.\n\nRemove and recreate the container."
+            ),
+            'created': (
+                f"'{container_name}' exists but has never been started.\n\nStart it first."
+            ),
+            'removing': (
+                f"'{container_name}' is being removed."
+            ),
+        }
+        msg = messages.get(
+            state,
+            f"'{container_name}' is not ready for terminal access (state: {state or 'unknown'})."
+        )
+        messagebox.showwarning("Terminal Unavailable", msg)
+        return
+
+    # If the app needs sudo for Docker, build a silent SUDO_ASKPASS helper so
+    # that the interactive `docker exec -it` stdin is never touched by sudo's
+    # password prompt.  The askpass script is deleted once the session ends.
+    askpass_path = None
+    if sudo_pw:
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.sh', delete=False) as ap:
+            ap.write('#!/bin/bash\n')
+            ap.write(f'echo {_quote(sudo_pw)}\n')
+            askpass_path = ap.name
+        os.chmod(askpass_path, 0o700)
+        docker_prefix = f'SUDO_ASKPASS={_quote(askpass_path)} sudo -A '
+    else:
+        docker_prefix = ''
+
     # Create a temporary script to avoid quoting issues
+    cid_q = _quote(container_id)
     with tempfile.NamedTemporaryFile(mode='w', suffix='.sh', delete=False) as script_file:
         script_file.write('#!/bin/bash\n')
-        # Set terminal title using escape sequences
         script_file.write(f'echo -ne "\\033]0;{container_name} ({container_id[:12]})\\007"\n')
-        # script_file.write('echo ""\n')
-        # Set custom PS1 prompt with container name and ID, then exec into container
         prompt = f'{container_name}({container_id[:12]})# '
-        script_file.write(f'docker exec -it {container_id} /bin/bash -c \'PS1="{prompt}" exec /bin/bash\' 2>/dev/null || \\\n')
-        script_file.write(f'docker exec -it {container_id} /bin/sh -c \'PS1="{prompt}" exec /bin/sh\'\n')
+        script_file.write(f'{docker_prefix}docker exec -it {cid_q} /bin/bash -c \'PS1="{prompt}" exec /bin/bash\' 2>/dev/null || \\\n')
+        script_file.write(f'{docker_prefix}docker exec -it {cid_q} /bin/sh -c \'PS1="{prompt}" exec /bin/sh\'\n')
+        if askpass_path:
+            script_file.write(f'rm -f {_quote(askpass_path)}\n')
         script_file.write('echo ""\n')
         script_file.write('echo "Press Enter to close..."\n')
         script_file.write('read\n')
         script_path = script_file.name
-    
+
     os.chmod(script_path, 0o755)
     
     title = f'{container_name} ({container_id[:12]})'
@@ -1229,6 +1312,11 @@ def open_container_terminal_dialog(root, display_manager):
                         os.unlink(script_path)
                     except Exception:
                         pass
+                    if askpass_path:
+                        try:
+                            os.unlink(askpass_path)
+                        except Exception:
+                            pass
                 threading.Thread(target=cleanup_script, daemon=True).start()
                 break
                 
@@ -1243,11 +1331,11 @@ def open_container_terminal_dialog(root, display_manager):
         # Clean up script file
         try:
             os.unlink(script_path)
-        except:
+        except OSError:
             pass
             
         # Show fallback dialog
-        fallback_cmd = f"docker exec -it {container_id} /bin/sh"
+        fallback_cmd = f"docker exec -it {cid_q} /bin/sh"
         
         # Create a dialog with the command to copy
         cmd_dialog = tk.Toplevel(root)
@@ -1545,9 +1633,9 @@ def view_container_logs_dialog(root, display_manager):
                         break
 
                     logs_window.after(0, lambda value=line: append_log_line(value))
-            except:
+            except (OSError, ValueError):
                 pass
-            
+
             process.kill()
             logs_window.after(0, lambda: status_label.config(text="✓ Stopped following logs", foreground="gray"))
         
@@ -1732,7 +1820,7 @@ def docker_disk_usage_view(output_container, loading_callback):
             
             i += 1
     
-    async_run(DOCKER_DISK_USAGE_VERBOSE, callback, sudo=False, sudo_password=None, 
+    async_run(DOCKER_DISK_USAGE_VERBOSE, callback, sudo=True, sudo_password=get_sudo_password(),
              loading_callback=loading_callback)
 
 
@@ -2181,7 +2269,7 @@ def create_selected_item_actions(action_frame, root, display_manager, refresh_im
 
         name_var = tk.StringVar()
         restart_var = tk.StringVar(value="unless-stopped")
-        network_names = [name for name in run_cmd(DOCKER_NETWORK_NAMES).splitlines() if name.strip()]
+        network_names = [name for name in run_cmd(DOCKER_NETWORK_NAMES, sudo=True, sudo_password=get_sudo_password()).splitlines() if name.strip()]
         network_var = tk.StringVar(value="")
         command_var = tk.StringVar()
 
@@ -2254,7 +2342,7 @@ def create_selected_item_actions(action_frame, root, display_manager, refresh_im
 
         all_containers = []
         for row in rows:
-            containers = run_cmd(DOCKER_INSPECT_ANCESTOR.format(image_id=row[3]))
+            containers = run_cmd(DOCKER_INSPECT_ANCESTOR.format(image_id=row[3]), sudo=True, sudo_password=get_sudo_password())
             if containers:
                 all_containers.extend(containers.splitlines())
 

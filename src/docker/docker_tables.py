@@ -34,7 +34,7 @@ def show_running_containers(show_table_callback, show_loading_callback, append=F
     show_table_command(
         DOCKER_PS_RUNNING,
         ["CONTAINER ID", "NAMES", "IMAGE", "STATUS", "PORTS", "SIZE"],
-        sudo=False,
+        sudo=True, sudo_password=get_sudo_password(),
         table_callback=show_table_callback,
         loading_callback=show_loading_callback,
         table_type='container',
@@ -49,7 +49,7 @@ def show_all_containers(show_table_callback, show_loading_callback):
     show_table_command(
         DOCKER_PS_ALL,
         ["CONTAINER ID", "NAMES", "IMAGE", "STATUS", "PORTS", "SIZE"],
-        sudo=False,
+        sudo=True, sudo_password=get_sudo_password(),
         table_callback=show_table_callback,
         loading_callback=show_loading_callback,
         table_type='container',
@@ -63,7 +63,7 @@ def show_stopped_containers(show_table_callback, show_loading_callback, append=F
     show_table_command(
         DOCKER_PS_STOPPED,
         ["CONTAINER ID", "NAMES", "IMAGE", "STATUS", "PORTS", "SIZE"],
-        sudo=False,
+        sudo=True, sudo_password=get_sudo_password(),
         table_callback=show_table_callback,
         loading_callback=show_loading_callback,
         table_type='container',
@@ -78,7 +78,7 @@ def show_paused_containers(show_table_callback, show_loading_callback, append=Fa
     show_table_command(
         DOCKER_PS_PAUSED,
         ["CONTAINER ID", "NAMES", "IMAGE", "STATUS", "PORTS", "SIZE"],
-        sudo=False,
+        sudo=True, sudo_password=get_sudo_password(),
         table_callback=show_table_callback,
         loading_callback=show_loading_callback,
         table_type='container',
@@ -124,7 +124,7 @@ def show_containers_with_stats(show_table_callback, show_loading_callback, displ
         live_btn.config(text="⏹ Stop Live Stats" if display_manager.live_stats_enabled else "▶ Live Stats")
     
     # First check if there are running containers
-    running = run_cmd(DOCKER_PS_IDS_RUNNING).strip()
+    running = run_cmd(DOCKER_PS_IDS_RUNNING, sudo=True, sudo_password=get_sudo_password()).strip()
     if not running:
         # No running containers
         show_table_callback(
@@ -169,7 +169,7 @@ def show_containers_with_stats(show_table_callback, show_loading_callback, displ
     # Only query running containers for faster performance
     async_run(
         DOCKER_STATS_NO_STREAM,
-        callback, sudo=False, sudo_password=None, loading_callback=show_loading_callback
+        callback, sudo=True, sudo_password=get_sudo_password(), loading_callback=show_loading_callback
     )
 
 
@@ -179,7 +179,7 @@ def show_images(show_table_callback, show_loading_callback):
     show_table_command(
         DOCKER_IMAGES_ALL,
         ["REPOSITORY", "TAG", "IMAGE ID", "SIZE"],
-        sudo=False,
+        sudo=True, sudo_password=get_sudo_password(),
         table_callback=show_table_callback,
         loading_callback=show_loading_callback,
         table_type='image',
@@ -201,13 +201,14 @@ def show_unused_images(show_table_callback, show_loading_callback, append=False)
                     all_image_rows.append(parts)
         
         # Get images used by containers
-        container_ids = run_cmd(DOCKER_PS_IDS_ALL).strip()
+        sudo_pw = get_sudo_password()
+        container_ids = run_cmd(DOCKER_PS_IDS_ALL, sudo=True, sudo_password=sudo_pw).strip()
         used_image_ids = set()
-        
+
         if container_ids:
             for container_id in container_ids.split('\n'):
                 if container_id.strip():
-                    image_sha = run_cmd(f"docker inspect --format='{{{{.Image}}}}' {container_id.strip()}").strip()
+                    image_sha = run_cmd(f"docker inspect --format='{{{{.Image}}}}' {container_id.strip()}", sudo=True, sudo_password=sudo_pw).strip()
                     if image_sha:
                         image_sha = image_sha.replace('sha256:', '')
                         used_image_ids.add(image_sha)
@@ -220,7 +221,7 @@ def show_unused_images(show_table_callback, show_loading_callback, append=False)
     
     async_run(
         DOCKER_IMAGES_ALL,
-        callback, sudo=False, sudo_password=None, loading_callback=show_loading_callback
+        callback, sudo=True, sudo_password=get_sudo_password(), loading_callback=show_loading_callback
     )
 
 
@@ -238,13 +239,14 @@ def show_used_images(show_table_callback, show_loading_callback, append=False):
                     all_image_rows.append(parts)
         
         # Get images used by containers
-        container_ids = run_cmd(DOCKER_PS_IDS_ALL).strip()
+        sudo_pw = get_sudo_password()
+        container_ids = run_cmd(DOCKER_PS_IDS_ALL, sudo=True, sudo_password=sudo_pw).strip()
         used_image_ids = set()
-        
+
         if container_ids:
             for container_id in container_ids.split('\n'):
                 if container_id.strip():
-                    image_sha = run_cmd(DOCKER_INSPECT_IMAGE.format(container_id=container_id.strip())).strip()
+                    image_sha = run_cmd(DOCKER_INSPECT_IMAGE.format(container_id=container_id.strip()), sudo=True, sudo_password=sudo_pw).strip()
                     if image_sha:
                         image_sha = image_sha.replace('sha256:', '')
                         used_image_ids.add(image_sha)
@@ -257,7 +259,7 @@ def show_used_images(show_table_callback, show_loading_callback, append=False):
     
     async_run(
         DOCKER_IMAGES_ALL,
-        callback, sudo=False, sudo_password=None, loading_callback=show_loading_callback
+        callback, sudo=True, sudo_password=get_sudo_password(), loading_callback=show_loading_callback
     )
 
 
@@ -265,12 +267,13 @@ def _collect_volume_rows(result):
     """Collect volume rows with usage details from docker system df -v output."""
     volume_containers = {}
 
-    containers_result = run_cmd(DOCKER_PS_NAMES_ALL).strip()
+    sudo_pw = get_sudo_password()
+    containers_result = run_cmd(DOCKER_PS_NAMES_ALL, sudo=True, sudo_password=sudo_pw).strip()
     if containers_result:
         container_names = containers_result.split('\n')
         for container_name in container_names:
             if container_name.strip():
-                mounts = run_cmd(DOCKER_INSPECT_MOUNTS.format(container_name=container_name)).strip()
+                mounts = run_cmd(DOCKER_INSPECT_MOUNTS.format(container_name=container_name), sudo=True, sudo_password=sudo_pw).strip()
                 if mounts and mounts != '[]':
                     import json
                     try:
@@ -282,7 +285,7 @@ def _collect_volume_rows(result):
                                     if vol_name not in volume_containers:
                                         volume_containers[vol_name] = []
                                     volume_containers[vol_name].append(container_name)
-                    except Exception:
+                    except (json.JSONDecodeError, ValueError):
                         pass
 
     lines = result.split('\n')
@@ -317,7 +320,7 @@ def show_volumes(show_table_callback, show_loading_callback):
         rows = _collect_volume_rows(result)
         show_table_callback(["VOLUME NAME", "LINKS", "SIZE", "USED BY"], rows, 'volume', "Volumes", False)
     
-    async_run(DOCKER_DISK_USAGE_VERBOSE, callback, sudo=False, sudo_password=None, 
+    async_run(DOCKER_DISK_USAGE_VERBOSE, callback, sudo=True, sudo_password=get_sudo_password(), 
              loading_callback=show_loading_callback)
 
 
@@ -335,7 +338,7 @@ def show_used_volumes(show_table_callback, show_loading_callback, append=False):
             append
         )
 
-    async_run(DOCKER_DISK_USAGE_VERBOSE, callback, sudo=False, sudo_password=None,
+    async_run(DOCKER_DISK_USAGE_VERBOSE, callback, sudo=True, sudo_password=get_sudo_password(),
              loading_callback=show_loading_callback)
 
 
@@ -353,7 +356,7 @@ def show_unused_volumes(show_table_callback, show_loading_callback, append=False
             append
         )
 
-    async_run(DOCKER_DISK_USAGE_VERBOSE, callback, sudo=False, sudo_password=None,
+    async_run(DOCKER_DISK_USAGE_VERBOSE, callback, sudo=True, sudo_password=get_sudo_password(),
              loading_callback=show_loading_callback)
 
 
@@ -388,7 +391,7 @@ def show_docker_disk_storage_simple(show_table_callback, show_loading_callback):
             rows, 'disk_storage', "Docker Disk Storage", False
         )
     
-    async_run(DOCKER_DISK_STORAGE_SIMPLE, callback, sudo=False, sudo_password=None, 
+    async_run(DOCKER_DISK_STORAGE_SIMPLE, callback, sudo=True, sudo_password=get_sudo_password(), 
              loading_callback=show_loading_callback)
 
 
@@ -398,7 +401,7 @@ def show_networks(show_table_callback, show_loading_callback):
     show_table_command(
         DOCKER_NETWORK_LS,
         ["NETWORK ID", "NAME", "DRIVER", "SCOPE"],
-        sudo=False,
+        sudo=True, sudo_password=get_sudo_password(),
         table_callback=show_table_callback,
         loading_callback=show_loading_callback,
         table_type='network',
@@ -434,5 +437,5 @@ def show_compose_projects(show_table_callback, show_loading_callback):
 
     async_run(
         DOCKER_COMPOSE_LS,
-        callback, sudo=False, sudo_password=None, loading_callback=show_loading_callback
+        callback, sudo=True, sudo_password=get_sudo_password(), loading_callback=show_loading_callback
     )

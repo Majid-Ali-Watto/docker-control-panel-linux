@@ -206,7 +206,7 @@ def prompt_docker_installation():
                         subprocess.Popen([terminal, "-e", f"bash -c '{install_commands}'"])
                     terminal_found = True
                     break
-            except:
+            except (FileNotFoundError, OSError, subprocess.SubprocessError):
                 continue
         
         if not terminal_found:
