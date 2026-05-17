@@ -35,6 +35,7 @@ CATEGORY_TOOLTIPS = {
         "Used": "Show images currently in use by at least one container",
         "Unused": "Show images not attached to any container (safe to delete)",
         "Pull": "Download a new image from Docker Hub\n(e.g. nginx:latest, ubuntu:22.04)",
+        "Pull Status": "Reopen the latest image pull progress or final result window",
         "Search Hub": "Search Docker Hub for public images by keyword",
         "Build": "Build a Docker image from a folder containing a Dockerfile",
         "Build Status": "Reopen the latest image build progress or final result window",

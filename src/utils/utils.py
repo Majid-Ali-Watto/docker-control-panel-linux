@@ -4,6 +4,7 @@ Common utility functions for Docker operations and checks.
 """
 
 import os
+import re
 import subprocess
 import threading
 from src.utils.threads import startThreadForTask
@@ -93,7 +94,11 @@ def run_cmd(cmd, sudo=False, sudo_password=None):
             text=True
         )
         stdout, stderr = process.communicate(input=f"{sudo_password}\n")
-        result = stdout + stderr
+        clean_stderr = '\n'.join(
+            line for line in stderr.splitlines()
+            if not re.match(r'^\[sudo\]|^Password:|^Sorry,', line.strip(), re.IGNORECASE)
+        ).strip()
+        result = stdout if stdout.strip() or not clean_stderr else clean_stderr
         return result.strip()
     else:
         try:

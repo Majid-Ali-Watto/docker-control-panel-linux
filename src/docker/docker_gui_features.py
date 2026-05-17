@@ -8,6 +8,10 @@ from tkinter import ttk, messagebox, filedialog
 import threading
 import subprocess
 import shlex
+import urllib.request
+import urllib.error
+import json
+import re
 from src.utils.utils import run_cmd, async_run, parse_fixed_width_table, clean_subprocess_env
 from src.config.config_manager import get_sudo_password
 from src.config.config_tooltips import ACTION_TOOLTIPS
@@ -78,6 +82,7 @@ def _make_output_callback(show_text_output_callback, title="", refresh_callback=
 
 
 _LATEST_BUILD_SESSION = None
+_LATEST_PULL_SESSION = None
 
 
 def _session_status_text(session):
@@ -189,11 +194,11 @@ def _show_stream_session_window(root, session):
     footer = ttk.Frame(window)
     footer.pack(fill=tk.X, padx=10, pady=(0, 10))
 
-    cancel_btn = ttk.Button(footer, text="Cancel Build", width=14)
+    cancel_btn = ttk.Button(footer, text=session.get('cancel_label', 'Cancel'), width=14)
     cancel_btn.pack(side=tk.RIGHT, padx=(0, 12))
     close_btn = ttk.Button(footer, text="Close", width=12)
     close_btn.pack(side=tk.RIGHT, padx=(0, 12))
-    retry_btn = ttk.Button(footer, text="Retry Build", width=12, style="warning.TButton")
+    retry_btn = ttk.Button(footer, text=session.get('retry_label', 'Retry'), width=12, style="warning.TButton")
 
     def on_cancel():
         if session.get('status') != 'running' or not session.get('controller'):
@@ -235,7 +240,7 @@ def _verify_built_image_tag(tag, sudo_password=None):
     )
 
 
-def _start_stream_session(root, title, command, sudo=False, sudo_password=None, on_success=None, success_validator=None):
+def _start_stream_session(root, title, command, sudo=False, sudo_password=None, on_success=None, success_validator=None, cancel_label='Cancel', retry_label='Retry'):
     """Create and start a tracked stream session."""
     session = {
         'root': root,
@@ -253,6 +258,8 @@ def _start_stream_session(root, title, command, sudo=False, sudo_password=None, 
         'output_text': None,
         'cancel_btn': None,
         'retry_btn': None,
+        'cancel_label': cancel_label,
+        'retry_label': retry_label,
     }
 
     def append_output(line):
@@ -324,10 +331,20 @@ def reopen_latest_build_status_window(root):
     return _LATEST_BUILD_SESSION['window']
 
 
+def reopen_latest_pull_status_window(root):
+    """Reopen the latest pull status window if a pull session exists."""
+    if not _LATEST_PULL_SESSION:
+        messagebox.showinfo("Pull Status", "No image pull session has been started yet.", parent=root)
+        return
+    _show_stream_session_window(root, _LATEST_PULL_SESSION)
+    return _LATEST_PULL_SESSION['window']
+
+
 def pull_image_dialog(root, refresh_callback):
-    """Pull image from Docker Hub dialog"""
+    """Pull image from Docker Hub."""
+    global _LATEST_PULL_SESSION
     if not check_docker_running(): return
-    
+
     dialog = tk.Toplevel(root)
     dialog.title("Pull Docker Image")
     dialog.resizable(False, False)
@@ -345,15 +362,11 @@ def pull_image_dialog(root, refresh_callback):
     ttk.Label(dialog, text="Leave empty for 'latest' tag",
               font=("Arial", 8), foreground="gray").pack(pady=(0, 4))
 
-    result_label = ttk.Label(dialog, text="", font=("Arial", 9))
-    result_label.pack(pady=6)
-
     btn_frame = ttk.Frame(dialog)
     btn_frame.pack(pady=(8, 20))
-    ttk.Button(btn_frame, text="Pull", command=lambda: on_pull(), width=12).pack(side=tk.LEFT, padx=5)
+    ttk.Button(btn_frame, text="Pull", style="primary.TButton", command=lambda: on_pull(), width=12).pack(side=tk.LEFT, padx=5)
     ttk.Button(btn_frame, text="Cancel", command=dialog.destroy, width=12).pack(side=tk.LEFT, padx=5)
 
-    # Auto-size to fit all widgets, then center
     dialog.update_idletasks()
     w = max(dialog.winfo_reqwidth() + 20, 460)
     h = dialog.winfo_reqheight() + 16
@@ -362,28 +375,24 @@ def pull_image_dialog(root, refresh_callback):
     dialog.geometry(f"{w}x{h}+{x}+{y}")
 
     def on_pull():
+        global _LATEST_PULL_SESSION
         image_name = image_var.get().strip()
         if not image_name:
             messagebox.showwarning("Input Required", "Please enter an image name", parent=dialog)
             return
-
-        result_label.config(text="⏳ Pulling image...", foreground="orange")
-        dialog.update()
-
-        def pull_task():
-            result = run_cmd(DOCKER_PULL.format(image_name=image_name), sudo=True, sudo_password=get_sudo_password())
-            dialog.after(0, lambda: on_pull_complete(result))
-
-        startThreadForTask(pull_task)
-
-    def on_pull_complete(result):
-        if "Downloaded" in result or "up to date" in result or "Status: Image is up to date" in result:
-            result_label.config(text="✅ Image pulled successfully!", foreground="green")
-            dialog.after(2000, dialog.destroy)
-            root.after(2100, refresh_callback)
-        else:
-            result_label.config(text="❌ Failed to pull image", foreground="red")
-            messagebox.showerror("Pull Failed", f"Failed to pull image:\n{result[:500]}", parent=dialog)
+        dialog.destroy()
+        command = DOCKER_PULL.format(image_name=_quote(image_name))
+        _LATEST_PULL_SESSION = _start_stream_session(
+            root,
+            title=f"Pull — {image_name}",
+            command=command,
+            sudo=True,
+            sudo_password=get_sudo_password(),
+            on_success=refresh_callback,
+            cancel_label="Cancel Pull",
+            retry_label="Retry Pull",
+        )
+        _show_stream_session_window(root, _LATEST_PULL_SESSION)
 
     image_entry.bind("<Return>", lambda e: on_pull())
     image_entry.bind("<Escape>", lambda e: dialog.destroy())
@@ -461,7 +470,31 @@ def push_image_dialog(root, image_ref="", refresh_callback=None):
     image_entry.bind("<Escape>", lambda e: dialog.destroy())
 
 
-def search_hub_dialog(root, refresh_callback=None):
+def _format_bytes(n):
+    for unit in ('B', 'KB', 'MB', 'GB'):
+        if n < 1024:
+            return f"{n:.1f} {unit}"
+        n /= 1024
+    return f"{n:.1f} GB"
+
+
+def _fetch_hub_size(image_name):
+    """Return compressed size of image's latest tag from Docker Hub API, or empty string on failure."""
+    name = image_name.split(':')[0]
+    tag = image_name.split(':')[1] if ':' in image_name else 'latest'
+    namespace, repo = ('library', name) if '/' not in name else name.split('/', 1)
+    url = f"https://hub.docker.com/v2/repositories/{namespace}/{repo}/tags/{tag}"
+    try:
+        req = urllib.request.Request(url, headers={'User-Agent': 'docker-gui/1.0'})
+        with urllib.request.urlopen(req, timeout=6) as resp:
+            data = json.loads(resp.read())
+            size = data.get('full_size', 0)
+            return _format_bytes(size) if size else ''
+    except Exception:
+        return ''
+
+
+def search_hub_dialog(root, refresh_callback=None, show_text_output=None):
     """Search Docker Hub for images and optionally pull one."""
     if not check_docker_running(): return
 
@@ -469,6 +502,8 @@ def search_hub_dialog(root, refresh_callback=None):
     dialog.title("Search Docker Hub")
     dialog.transient(root)
     dialog.grab_set()
+
+    _stop_sizes = threading.Event()
 
     # Search bar
     search_frame = ttk.Frame(dialog)
@@ -490,11 +525,11 @@ def search_hub_dialog(root, refresh_callback=None):
     table_frame = ttk.Frame(dialog)
     table_frame.pack(fill=tk.BOTH, expand=True, padx=12, pady=(6, 0))
 
-    columns = ("NAME", "DESCRIPTION", "STARS", "OFFICIAL")
+    columns = ("NAME", "DESCRIPTION", "STARS", "OFFICIAL", "SIZE")
     table = ttk.Treeview(table_frame, columns=columns, show="headings", selectmode="browse")
-    for col, w in [("NAME", 200), ("DESCRIPTION", 380), ("STARS", 70), ("OFFICIAL", 80)]:
+    for col, w in [("NAME", 180), ("DESCRIPTION", 340), ("STARS", 65), ("OFFICIAL", 75), ("SIZE", 95)]:
         table.heading(col, text=col)
-        anchor = "center" if col in ("STARS", "OFFICIAL") else "w"
+        anchor = "center" if col in ("STARS", "OFFICIAL", "SIZE") else "w"
         table.column(col, width=w, minwidth=max(50, w // 2), anchor=anchor)
 
     scroll_y = ttk.Scrollbar(table_frame, orient=tk.VERTICAL, command=table.yview)
@@ -535,6 +570,7 @@ def search_hub_dialog(root, refresh_callback=None):
         startThreadForTask(search_task)
 
     def on_search_complete(result, term):
+        _stop_sizes.clear()
         btn_search.config(state=tk.NORMAL)
         rows = []
         for line in result.split('\n'):
@@ -549,46 +585,63 @@ def search_hub_dialog(root, refresh_callback=None):
                 status_label.config(text=f"No results found for '{term}'", foreground="gray")
             return
 
+        item_ids = []
         for i, row in enumerate(rows):
             tag = 'oddrow' if i % 2 else 'evenrow'
-            table.insert("", tk.END, values=row, tags=(tag,))
+            iid = table.insert("", tk.END, values=row + ['…'], tags=(tag,))
+            item_ids.append(iid)
         status_label.config(
             text=f"Found {len(rows)} result(s) — select one and click Pull to download",
             foreground="green",
         )
 
+        image_names = [str(table.item(iid)['values'][0]) for iid in item_ids]
+
+        def _set_size(iid, size):
+            try:
+                vals = list(table.item(iid)['values'])
+                vals[4] = size
+                table.item(iid, values=vals)
+            except Exception:
+                pass
+
+        def fetch_sizes():
+            for iid, name in zip(item_ids, image_names):
+                if _stop_sizes.is_set():
+                    break
+                size = _fetch_hub_size(name)
+                if _stop_sizes.is_set():
+                    break
+                try:
+                    dialog.after(0, lambda i=iid, s=size or '—': _set_size(i, s))
+                except Exception:
+                    break
+
+        threading.Thread(target=fetch_sizes, daemon=True).start()
+
     def on_select(event):
         btn_pull.config(state=tk.NORMAL if table.selection() else tk.DISABLED)
 
     def do_pull():
+        global _LATEST_PULL_SESSION
         sel = table.selection()
         if not sel:
             return
         image_name = str(table.item(sel[0])['values'][0])
-        status_label.config(text=f"⏳ Pulling {image_name}…", foreground="orange")
-        btn_pull.config(state=tk.DISABLED)
-        btn_search.config(state=tk.DISABLED)
-        dialog.update()
-
-        def pull_task():
-            result = run_cmd(
-                DOCKER_PULL.format(image_name=image_name),
-                sudo=True, sudo_password=get_sudo_password(),
-            )
-            dialog.after(0, lambda: on_pull_complete(result, image_name))
-
-        startThreadForTask(pull_task)
-
-    def on_pull_complete(result, image_name):
-        btn_search.config(state=tk.NORMAL)
-        btn_pull.config(state=tk.NORMAL)
-        if any(k in result for k in ("Downloaded", "up to date", "Status: Image is up to date")):
-            status_label.config(text=f"✅ {image_name} pulled successfully!", foreground="green")
-            if refresh_callback:
-                root.after(800, refresh_callback)
-        else:
-            status_label.config(text=f"❌ Pull failed for {image_name}", foreground="red")
-            messagebox.showerror("Pull Failed", f"Failed to pull image:\n{result[:500]}", parent=dialog)
+        _stop_sizes.set()
+        dialog.destroy()
+        command = DOCKER_PULL.format(image_name=_quote(image_name))
+        _LATEST_PULL_SESSION = _start_stream_session(
+            root,
+            title=f"Pull — {image_name}",
+            command=command,
+            sudo=True,
+            sudo_password=get_sudo_password(),
+            on_success=refresh_callback,
+            cancel_label="Cancel Pull",
+            retry_label="Retry Pull",
+        )
+        _show_stream_session_window(root, _LATEST_PULL_SESSION)
 
     table.bind("<<TreeviewSelect>>", on_select)
     table.bind("<Double-1>", lambda e: do_pull() if table.selection() else None)
@@ -598,7 +651,7 @@ def search_hub_dialog(root, refresh_callback=None):
     search_entry.bind("<Escape>", lambda e: dialog.destroy())
 
     dialog.update_idletasks()
-    w, h = 860, 520
+    w, h = 960, 520
     x = (dialog.winfo_screenwidth() - w) // 2
     y = (dialog.winfo_screenheight() - h) // 2
     dialog.geometry(f"{w}x{h}+{x}+{y}")
@@ -674,6 +727,8 @@ def build_image_dialog(root, show_text_output_callback, refresh_callback=None):
             sudo_password=get_sudo_password(),
             on_success=lambda: refresh_callback() if refresh_callback else None,
             success_validator=lambda: _verify_built_image_tag(tag, get_sudo_password()),
+            cancel_label='Cancel Build',
+            retry_label='Retry Build',
         )
         build_window = _show_stream_session_window(root, _LATEST_BUILD_SESSION)
         dialog.destroy()
