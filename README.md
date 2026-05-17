@@ -23,6 +23,7 @@ Other highlights:
 - **Password manager** — sudo password stored securely in `~/.docker-gui/config.json` (0600)
 - **Sidebar status** — Docker Running ✅ / Stopped ❌ always visible
 - **Active category indicator** — theme-coloured accent strip on the active sidebar button
+- **Pull / Build status** — close the streaming window and re-open it later via the status button
 
 ## Requirements
 
@@ -59,6 +60,8 @@ docker-ui-modular/
 ├── install.sh                   # Desktop integration installer
 ├── assets/
 │   └── docker-icon.svg          # App icon
+├── tests/
+│   └── test_buttons.py          # Unit tests (109 tests, no daemon needed)
 └── src/
     ├── config/
     │   ├── config_manager.py    # Password / config I/O
@@ -66,29 +69,74 @@ docker-ui-modular/
     │   ├── config_themes.py     # Theme colour palettes
     │   └── config_tooltips.py   # Tooltip text for all buttons
     ├── docker/
-    │   ├── docker_actions.py    # Bulk actions (start/stop/delete all)
-    │   ├── docker_commands_constants.py  # All docker CLI strings
-    │   ├── docker_gui_features.py        # Dialogs: pull, terminal, logs, disk
-    │   ├── docker_operations.py          # subprocess execution layer
-    │   └── docker_tables.py             # Treeview population
+    │   ├── actions.py           # Docker service actions (start/stop/restart)
+    │   ├── commands.py          # All docker CLI command strings (single source)
+    │   └── operations.py        # subprocess execution layer
+    ├── containers/
+    │   ├── actions.py           # Bulk container actions (start/stop/restart/delete all)
+    │   ├── dialogs.py           # File browser, terminal, logs dialogs
+    │   └── tables.py            # Container Treeview population
+    ├── images/
+    │   ├── actions.py           # Bulk image actions (prune, delete all)
+    │   ├── dialogs.py           # Pull, push, search Hub, build, load dialogs
+    │   └── tables.py            # Image Treeview population
+    ├── volumes/
+    │   ├── actions.py           # Bulk volume actions (prune, delete used/all)
+    │   ├── dialogs.py           # Create volume dialog
+    │   └── tables.py            # Volume Treeview population
+    ├── networks/
+    │   ├── actions.py           # Bulk network actions (prune)
+    │   ├── dialogs.py           # Create network dialog
+    │   └── tables.py            # Network Treeview population
+    ├── compose/
+    │   ├── dialogs.py           # Compose up-from-file dialog
+    │   └── tables.py            # Compose project Treeview population
+    ├── stats/
+    │   ├── dialogs.py           # Disk usage detail view
+    │   └── tables.py            # Stats and disk storage Treeview population
+    ├── shared/
+    │   ├── context_menus.py     # Right-click menus for table and text views
+    │   ├── helpers.py           # Shared formatting / argument-building utilities
+    │   ├── item_actions.py      # Per-row action buttons (create_selected_item_actions)
+    │   └── stream.py            # Session-tracking for streaming commands (build/pull)
     ├── ui/
-    │   ├── ui_components.py     # Reusable dialogs (password, install)
+    │   ├── ui_components.py     # Reusable dialogs (password prompt, install prompt, Tooltip)
     │   ├── ui_display.py        # DisplayManager — owns the output area
+    │   ├── terminal_panel.py    # Embedded terminal panel
     │   └── keyboard_navigation.py
     ├── help/
     │   ├── help_commands.py     # Commands tab text
     │   ├── help_creator.py      # Creator info
     │   └── help_info.py         # Help tab text
     └── utils/
-        ├── utils.py             # Docker detection, env helpers
+        ├── utils.py             # Docker detection, env helpers, run_cmd, async_run
         └── threads.py           # Async operation helpers
 ```
 
 ## Adding a New Action Button
 
-1. Add the command string to `src/docker/docker_commands_constants.py`.
-2. Implement the function in the appropriate `src/docker/` module.
+1. Add the command string to `src/docker/commands.py`.
+2. Implement the function in the appropriate feature module (e.g. `src/containers/actions.py`).
 3. Register the button in `src/config/config_menu.py` → `get_menu_structure()`.
+4. Add a tooltip entry to `src/config/config_tooltips.py`.
+
+## Adding a New Table View
+
+Follow the pattern in the relevant `tables.py` module:
+
+```python
+def show_my_resource(show_table_callback, show_loading_callback):
+    if not check_docker_running(): return
+    show_table_command(
+        MY_COMMAND,
+        ["Col1", "Col2"],
+        sudo=True, sudo_password=get_sudo_password(),
+        table_callback=show_table_callback,
+        loading_callback=show_loading_callback,
+        table_type='my_resource',
+        table_title="My Resources"
+    )
+```
 
 ## Security
 
@@ -101,10 +149,10 @@ docker-ui-modular/
 ## Tests
 
 ```bash
-python3 -m pytest tests/ -v
+python3 -m unittest tests/test_buttons.py -v
 ```
 
-Unit tests live in `tests/test_buttons.py` and cover all 72 constants in `docker_commands_constants.py` plus GUI action wiring. Tests use `unittest.mock` — no real Docker daemon is required.
+109 unit tests cover all command constants and GUI action wiring. Uses `unittest.mock` — no real Docker daemon required.
 
 ## Uninstall
 

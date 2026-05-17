@@ -20,7 +20,7 @@ sys.modules.setdefault('ttkbootstrap', MagicMock())
 import tkinter as tk
 from tkinter import ttk
 
-from src.docker.docker_commands_constants import (
+from src.docker.commands import (
     DOCKER_PS_RUNNING, DOCKER_PS_ALL, DOCKER_PS_STOPPED, DOCKER_PS_PAUSED,
     DOCKER_STATS_NO_STREAM, DOCKER_IMAGES_ALL, DOCKER_PS_IDS_ALL,
     DOCKER_PS_IDS_RUNNING, DOCKER_PS_NAMES_ALL,
@@ -103,12 +103,12 @@ class _Base(unittest.TestCase):
 
 class TestDockerServiceButtons(_Base):
 
-    @patch('src.docker.docker_actions.startThreadForTask', side_effect=_sync_thread)
-    @patch('src.docker.docker_actions.update_docker_status')
-    @patch('src.docker.docker_actions.get_sudo_password', return_value=FAKE_PW)
-    @patch('src.docker.docker_actions.run_cmd', return_value='active')
+    @patch('src.docker.actions.startThreadForTask', side_effect=_sync_thread)
+    @patch('src.docker.actions.update_docker_status')
+    @patch('src.docker.actions.get_sudo_password', return_value=FAKE_PW)
+    @patch('src.docker.actions.run_cmd', return_value='active')
     def test_start_docker(self, mock_run, *_):
-        from src.docker.docker_actions import start_docker_service
+        from src.docker.actions import start_docker_service
         with patch('time.sleep'):
             start_docker_service(self.root, tk.StringVar(), self.show_loading, self.show_output)
         mock_run.assert_any_call(
@@ -117,12 +117,12 @@ class TestDockerServiceButtons(_Base):
         )
         self.assertTrue(any('Start Docker' in t for t in self.output))
 
-    @patch('src.docker.docker_actions.startThreadForTask', side_effect=_sync_thread)
-    @patch('src.docker.docker_actions.update_docker_status')
-    @patch('src.docker.docker_actions.get_sudo_password', return_value=FAKE_PW)
-    @patch('src.docker.docker_actions.run_cmd', return_value='inactive')
+    @patch('src.docker.actions.startThreadForTask', side_effect=_sync_thread)
+    @patch('src.docker.actions.update_docker_status')
+    @patch('src.docker.actions.get_sudo_password', return_value=FAKE_PW)
+    @patch('src.docker.actions.run_cmd', return_value='inactive')
     def test_stop_docker(self, mock_run, *_):
-        from src.docker.docker_actions import stop_docker_service
+        from src.docker.actions import stop_docker_service
         with patch('time.sleep'):
             stop_docker_service(self.root, tk.StringVar(), self.show_loading, self.show_output)
         mock_run.assert_any_call(
@@ -130,12 +130,12 @@ class TestDockerServiceButtons(_Base):
             sudo=True, sudo_password=FAKE_PW,
         )
 
-    @patch('src.docker.docker_actions.startThreadForTask', side_effect=_sync_thread)
-    @patch('src.docker.docker_actions.update_docker_status')
-    @patch('src.docker.docker_actions.get_sudo_password', return_value=FAKE_PW)
-    @patch('src.docker.docker_actions.run_cmd', return_value='active')
+    @patch('src.docker.actions.startThreadForTask', side_effect=_sync_thread)
+    @patch('src.docker.actions.update_docker_status')
+    @patch('src.docker.actions.get_sudo_password', return_value=FAKE_PW)
+    @patch('src.docker.actions.run_cmd', return_value='active')
     def test_restart_docker(self, mock_run, *_):
-        from src.docker.docker_actions import restart_docker_service
+        from src.docker.actions import restart_docker_service
         with patch('time.sleep'):
             restart_docker_service(self.root, tk.StringVar(), self.show_loading, self.show_output)
         mock_run.assert_any_call(
@@ -155,9 +155,9 @@ class TestContainerTableButtons(_Base):
 
     def _patches(self, run_return=_FAKE_CONTAINER_ROW):
         return [
-            patch('src.docker.docker_tables.check_docker_running', return_value=True),
-            patch('src.utils.threads.startThreadForTask', side_effect=_sync_thread),
-            patch('src.docker.docker_tables.get_sudo_password', return_value=FAKE_PW),
+            patch('src.containers.tables.check_docker_running', return_value=True),
+            patch('src.utils.utils.startThreadForTask', side_effect=_sync_thread),
+            patch('src.containers.tables.get_sudo_password', return_value=FAKE_PW),
             patch('src.utils.utils.run_cmd', return_value=run_return),
         ]
 
@@ -174,7 +174,7 @@ class TestContainerTableButtons(_Base):
         return calls
 
     def test_show_all_containers(self):
-        from src.docker.docker_tables import show_all_containers
+        from src.containers.tables import show_all_containers
         calls = self._run(show_all_containers)
         self.assertTrue(calls)
         self.assertIn('CONTAINER ID', calls[0]['columns'])
@@ -182,25 +182,25 @@ class TestContainerTableButtons(_Base):
         self.assertEqual(calls[0]['rows'][0][0], 'abc123')
 
     def test_show_running_containers(self):
-        from src.docker.docker_tables import show_running_containers
+        from src.containers.tables import show_running_containers
         calls = self._run(lambda cb, ld: show_running_containers(cb, ld))
         self.assertTrue(calls)
         self.assertIn('CONTAINER ID', calls[0]['columns'])
 
     def test_show_stopped_containers(self):
-        from src.docker.docker_tables import show_stopped_containers
+        from src.containers.tables import show_stopped_containers
         calls = self._run(lambda cb, ld: show_stopped_containers(cb, ld))
         self.assertTrue(calls)
         self.assertIn('STATUS', calls[0]['columns'])
 
     def test_show_paused_containers(self):
-        from src.docker.docker_tables import show_paused_containers
+        from src.containers.tables import show_paused_containers
         calls = self._run(lambda cb, ld: show_paused_containers(cb, ld))
         self.assertTrue(calls)
         self.assertIn('CONTAINER ID', calls[0]['columns'])
 
     def test_show_all_containers_empty(self):
-        from src.docker.docker_tables import show_all_containers
+        from src.containers.tables import show_all_containers
         calls = self._run(show_all_containers, run_return='')
         self.assertTrue(calls)
         self.assertEqual(calls[0]['rows'], [])
@@ -212,49 +212,49 @@ class TestContainerTableButtons(_Base):
 
 class TestContainerActionButtons(_Base):
 
-    @patch('src.docker.docker_actions.check_docker_running', return_value=True)
+    @patch('src.containers.actions.check_docker_running', return_value=True)
     @patch('src.utils.utils.startThreadForTask', side_effect=_sync_thread)
-    @patch('src.docker.docker_actions.get_sudo_password', return_value=FAKE_PW)
+    @patch('src.containers.actions.get_sudo_password', return_value=FAKE_PW)
     @patch('src.utils.utils.run_cmd', return_value='started')
     def test_start_all_containers(self, mock_run, *_):
-        from src.docker.docker_actions import start_all_containers
+        from src.containers.actions import start_all_containers
         start_all_containers(self.show_output, self.show_loading)
         mock_run.assert_called_once_with(DOCKER_START_ALL, True, FAKE_PW)
 
-    @patch('src.docker.docker_actions.check_docker_running', return_value=True)
+    @patch('src.containers.actions.check_docker_running', return_value=True)
     @patch('src.utils.utils.startThreadForTask', side_effect=_sync_thread)
-    @patch('src.docker.docker_actions.get_sudo_password', return_value=FAKE_PW)
+    @patch('src.containers.actions.get_sudo_password', return_value=FAKE_PW)
     @patch('src.utils.utils.run_cmd', return_value='stopped')
     def test_stop_all_containers(self, mock_run, *_):
-        from src.docker.docker_actions import stop_all_containers
+        from src.containers.actions import stop_all_containers
         stop_all_containers(self.show_output, self.show_loading)
         mock_run.assert_called_once_with(DOCKER_STOP_ALL, True, FAKE_PW)
 
-    @patch('src.docker.docker_actions.check_docker_running', return_value=True)
+    @patch('src.containers.actions.check_docker_running', return_value=True)
     @patch('src.utils.utils.startThreadForTask', side_effect=_sync_thread)
-    @patch('src.docker.docker_actions.get_sudo_password', return_value=FAKE_PW)
+    @patch('src.containers.actions.get_sudo_password', return_value=FAKE_PW)
     @patch('src.utils.utils.run_cmd', return_value='restarted')
     def test_restart_all_containers(self, mock_run, *_):
-        from src.docker.docker_actions import restart_all_containers
+        from src.containers.actions import restart_all_containers
         restart_all_containers(self.show_output, self.show_loading)
         mock_run.assert_called_once_with(DOCKER_RESTART_ALL, True, FAKE_PW)
 
-    @patch('src.docker.docker_actions.check_docker_running', return_value=True)
+    @patch('src.containers.actions.check_docker_running', return_value=True)
     @patch('src.utils.utils.startThreadForTask', side_effect=_sync_thread)
-    @patch('src.docker.docker_actions.get_sudo_password', return_value=FAKE_PW)
+    @patch('src.docker.actions.get_sudo_password', return_value=FAKE_PW)
     @patch('src.ui.ui_components.confirm_action_dialog', return_value=True)
     @patch('src.utils.utils.run_cmd', return_value='deleted')
     def test_delete_all_containers_confirmed(self, mock_run, *_):
-        from src.docker.docker_actions import delete_all_containers
+        from src.containers.actions import delete_all_containers
         delete_all_containers(self.show_output, parent=self.root, show_loading_callback=self.show_loading)
         mock_run.assert_called_once_with(DOCKER_RM_ALL, True, FAKE_PW)
 
-    @patch('src.docker.docker_actions.check_docker_running', return_value=True)
+    @patch('src.containers.actions.check_docker_running', return_value=True)
     @patch('src.utils.utils.startThreadForTask', side_effect=_sync_thread)
     @patch('src.ui.ui_components.confirm_action_dialog', return_value=False)
     @patch('src.utils.utils.run_cmd', return_value='')
     def test_delete_all_containers_cancelled(self, mock_run, *_):
-        from src.docker.docker_actions import delete_all_containers
+        from src.containers.actions import delete_all_containers
         delete_all_containers(self.show_output, parent=self.root)
         mock_run.assert_not_called()
 
@@ -268,66 +268,66 @@ _FAKE_IMAGE_ROWS = 'nginx\tlatest\tabc123\t100MB\nubuntu\t22.04\tdef456\t200MB'
 
 class TestImageButtons(_Base):
 
-    @patch('src.docker.docker_tables.check_docker_running', return_value=True)
+    @patch('src.images.tables.check_docker_running', return_value=True)
     @patch('src.utils.utils.startThreadForTask', side_effect=_sync_thread)
-    @patch('src.docker.docker_tables.get_sudo_password', return_value=FAKE_PW)
+    @patch('src.images.tables.get_sudo_password', return_value=FAKE_PW)
     @patch('src.utils.utils.run_cmd', return_value=_FAKE_IMAGE_ROWS)
     def test_show_all_images(self, *_):
         cb, calls = _table_cb()
-        from src.docker.docker_tables import show_images
+        from src.images.tables import show_images
         show_images(cb, self.show_loading)
         self.assertTrue(calls)
         self.assertIn('REPOSITORY', calls[0]['columns'])
         self.assertEqual(len(calls[0]['rows']), 2)
         self.assertEqual(calls[0]['rows'][0][0], 'nginx')
 
-    @patch('src.docker.docker_tables.check_docker_running', return_value=True)
+    @patch('src.images.tables.check_docker_running', return_value=True)
     @patch('src.utils.utils.startThreadForTask', side_effect=_sync_thread)
-    @patch('src.docker.docker_tables.get_sudo_password', return_value=FAKE_PW)
+    @patch('src.images.tables.get_sudo_password', return_value=FAKE_PW)
     @patch('src.utils.utils.run_cmd', return_value=_FAKE_IMAGE_ROWS)
-    @patch('src.docker.docker_tables.run_cmd', return_value='')  # no running containers
+    @patch('src.images.tables.run_cmd', return_value='')  # no running containers
     def test_show_unused_images_all_unused_when_no_containers(self, *_):
         cb, calls = _table_cb()
-        from src.docker.docker_tables import show_unused_images
+        from src.images.tables import show_unused_images
         show_unused_images(cb, self.show_loading)
         self.assertTrue(calls)
         self.assertEqual(len(calls[0]['rows']), 2)
 
-    @patch('src.docker.docker_actions.check_docker_running', return_value=True)
+    @patch('src.images.actions.check_docker_running', return_value=True)
     @patch('src.utils.utils.startThreadForTask', side_effect=_sync_thread)
-    @patch('src.docker.docker_actions.get_sudo_password', return_value=FAKE_PW)
+    @patch('src.docker.actions.get_sudo_password', return_value=FAKE_PW)
     @patch('src.ui.ui_components.confirm_action_dialog', return_value=True)
     @patch('src.utils.utils.run_cmd', return_value='pruned')
     def test_prune_images_confirmed(self, mock_run, *_):
-        from src.docker.docker_actions import prune_images
+        from src.images.actions import prune_images
         prune_images(self.show_output, parent=self.root, show_loading_callback=self.show_loading)
         mock_run.assert_called_once_with(DOCKER_IMAGE_PRUNE, True, FAKE_PW)
 
-    @patch('src.docker.docker_actions.check_docker_running', return_value=True)
+    @patch('src.images.actions.check_docker_running', return_value=True)
     @patch('src.utils.utils.startThreadForTask', side_effect=_sync_thread)
     @patch('src.ui.ui_components.confirm_action_dialog', return_value=False)
     @patch('src.utils.utils.run_cmd', return_value='')
     def test_prune_images_cancelled(self, mock_run, *_):
-        from src.docker.docker_actions import prune_images
+        from src.images.actions import prune_images
         prune_images(self.show_output, parent=self.root)
         mock_run.assert_not_called()
 
-    @patch('src.docker.docker_actions.check_docker_running', return_value=True)
+    @patch('src.images.actions.check_docker_running', return_value=True)
     @patch('src.utils.utils.startThreadForTask', side_effect=_sync_thread)
-    @patch('src.docker.docker_actions.get_sudo_password', return_value=FAKE_PW)
+    @patch('src.docker.actions.get_sudo_password', return_value=FAKE_PW)
     @patch('src.ui.ui_components.confirm_action_dialog', return_value=True)
     @patch('src.utils.utils.run_cmd', return_value='deleted')
     def test_delete_all_images_confirmed(self, mock_run, *_):
-        from src.docker.docker_actions import delete_all_images
+        from src.images.actions import delete_all_images
         delete_all_images(self.show_output, parent=self.root, show_loading_callback=self.show_loading)
         mock_run.assert_called_once_with(DOCKER_RMI_ALL, True, FAKE_PW)
 
-    @patch('src.docker.docker_actions.check_docker_running', return_value=True)
+    @patch('src.images.actions.check_docker_running', return_value=True)
     @patch('src.utils.utils.startThreadForTask', side_effect=_sync_thread)
     @patch('src.ui.ui_components.confirm_action_dialog', return_value=False)
     @patch('src.utils.utils.run_cmd', return_value='')
     def test_delete_all_images_cancelled(self, mock_run, *_):
-        from src.docker.docker_actions import delete_all_images
+        from src.images.actions import delete_all_images
         delete_all_images(self.show_output, parent=self.root)
         mock_run.assert_not_called()
 
@@ -349,71 +349,71 @@ class TestVolumeButtons(_Base):
     def _async_with_df(self, *args, **_):
         args[1](_FAKE_DF_VOLUMES)
 
-    @patch('src.docker.docker_tables.check_docker_running', return_value=True)
-    @patch('src.docker.docker_tables.run_cmd', return_value='')
+    @patch('src.volumes.tables.check_docker_running', return_value=True)
+    @patch('src.volumes.tables.run_cmd', return_value='')
     def test_show_volumes(self, *_):
         cb, calls = _table_cb()
-        from src.docker.docker_tables import show_volumes
-        with patch('src.docker.docker_tables.async_run', side_effect=self._async_with_df):
+        from src.volumes.tables import show_volumes
+        with patch('src.volumes.tables.async_run', side_effect=self._async_with_df):
             show_volumes(cb, self.show_loading)
         self.assertTrue(calls)
         self.assertIn('VOLUME NAME', calls[0]['columns'])
 
-    @patch('src.docker.docker_tables.check_docker_running', return_value=True)
-    @patch('src.docker.docker_tables.run_cmd', return_value='')
+    @patch('src.volumes.tables.check_docker_running', return_value=True)
+    @patch('src.volumes.tables.run_cmd', return_value='')
     def test_show_unused_volumes(self, *_):
         cb, calls = _table_cb()
-        from src.docker.docker_tables import show_unused_volumes
-        with patch('src.docker.docker_tables.async_run', side_effect=self._async_with_df):
+        from src.volumes.tables import show_unused_volumes
+        with patch('src.volumes.tables.async_run', side_effect=self._async_with_df):
             show_unused_volumes(cb, self.show_loading)
         self.assertTrue(calls)
         unused = [r for r in calls[0]['rows'] if r[3] == '(unused)']
         self.assertEqual(len(unused), len(calls[0]['rows']))
 
-    @patch('src.docker.docker_tables.check_docker_running', return_value=True)
-    @patch('src.docker.docker_tables.run_cmd', return_value='container1')
+    @patch('src.volumes.tables.check_docker_running', return_value=True)
+    @patch('src.volumes.tables.run_cmd', return_value='container1')
     def test_show_used_volumes(self, *_):
         cb, calls = _table_cb()
-        from src.docker.docker_tables import show_used_volumes
-        with patch('src.docker.docker_tables.async_run', side_effect=self._async_with_df):
+        from src.volumes.tables import show_used_volumes
+        with patch('src.volumes.tables.async_run', side_effect=self._async_with_df):
             show_used_volumes(cb, self.show_loading)
         self.assertTrue(calls)
 
-    @patch('src.docker.docker_actions.check_docker_running', return_value=True)
+    @patch('src.volumes.actions.check_docker_running', return_value=True)
     @patch('src.utils.utils.startThreadForTask', side_effect=_sync_thread)
-    @patch('src.docker.docker_actions.get_sudo_password', return_value=FAKE_PW)
+    @patch('src.docker.actions.get_sudo_password', return_value=FAKE_PW)
     @patch('src.ui.ui_components.confirm_action_dialog', return_value=True)
     @patch('src.utils.utils.run_cmd', return_value='pruned')
     def test_prune_volumes_confirmed(self, mock_run, *_):
-        from src.docker.docker_actions import prune_volumes
+        from src.volumes.actions import prune_volumes
         prune_volumes(self.show_output, parent=self.root, show_loading_callback=self.show_loading)
         mock_run.assert_called_once_with(DOCKER_VOLUME_PRUNE, True, FAKE_PW)
 
-    @patch('src.docker.docker_actions.check_docker_running', return_value=True)
+    @patch('src.volumes.actions.check_docker_running', return_value=True)
     @patch('src.utils.utils.startThreadForTask', side_effect=_sync_thread)
     @patch('src.ui.ui_components.confirm_action_dialog', return_value=False)
     @patch('src.utils.utils.run_cmd', return_value='')
     def test_prune_volumes_cancelled(self, mock_run, *_):
-        from src.docker.docker_actions import prune_volumes
+        from src.volumes.actions import prune_volumes
         prune_volumes(self.show_output, parent=self.root)
         mock_run.assert_not_called()
 
-    @patch('src.docker.docker_actions.check_docker_running', return_value=True)
+    @patch('src.volumes.actions.check_docker_running', return_value=True)
     @patch('src.utils.utils.startThreadForTask', side_effect=_sync_thread)
-    @patch('src.docker.docker_actions.get_sudo_password', return_value=FAKE_PW)
+    @patch('src.docker.actions.get_sudo_password', return_value=FAKE_PW)
     @patch('src.ui.ui_components.confirm_action_dialog', return_value=True)
     @patch('src.utils.utils.run_cmd', return_value='deleted')
     def test_delete_all_volumes_confirmed(self, mock_run, *_):
-        from src.docker.docker_actions import delete_all_volumes
+        from src.volumes.actions import delete_all_volumes
         delete_all_volumes(self.show_output, parent=self.root, show_loading_callback=self.show_loading)
         mock_run.assert_called_once_with(DOCKER_VOLUME_RM_ALL, True, FAKE_PW)
 
-    @patch('src.docker.docker_actions.check_docker_running', return_value=True)
+    @patch('src.volumes.actions.check_docker_running', return_value=True)
     @patch('src.utils.utils.startThreadForTask', side_effect=_sync_thread)
     @patch('src.ui.ui_components.confirm_action_dialog', return_value=False)
     @patch('src.utils.utils.run_cmd', return_value='')
     def test_delete_all_volumes_cancelled(self, mock_run, *_):
-        from src.docker.docker_actions import delete_all_volumes
+        from src.volumes.actions import delete_all_volumes
         delete_all_volumes(self.show_output, parent=self.root)
         mock_run.assert_not_called()
 
@@ -424,34 +424,34 @@ class TestVolumeButtons(_Base):
 
 class TestNetworkButtons(_Base):
 
-    @patch('src.docker.docker_tables.check_docker_running', return_value=True)
+    @patch('src.networks.tables.check_docker_running', return_value=True)
     @patch('src.utils.utils.startThreadForTask', side_effect=_sync_thread)
-    @patch('src.docker.docker_tables.get_sudo_password', return_value=FAKE_PW)
+    @patch('src.networks.tables.get_sudo_password', return_value=FAKE_PW)
     @patch('src.utils.utils.run_cmd', return_value='abc123\tbridge\tbridge\tlocal')
     def test_show_all_networks(self, *_):
         cb, calls = _table_cb()
-        from src.docker.docker_tables import show_networks
+        from src.networks.tables import show_networks
         show_networks(cb, self.show_loading)
         self.assertTrue(calls)
         self.assertIn('NETWORK ID', calls[0]['columns'])
         self.assertEqual(len(calls[0]['rows']), 1)
 
-    @patch('src.docker.docker_actions.check_docker_running', return_value=True)
+    @patch('src.networks.actions.check_docker_running', return_value=True)
     @patch('src.utils.utils.startThreadForTask', side_effect=_sync_thread)
-    @patch('src.docker.docker_actions.get_sudo_password', return_value=FAKE_PW)
+    @patch('src.docker.actions.get_sudo_password', return_value=FAKE_PW)
     @patch('src.ui.ui_components.confirm_action_dialog', return_value=True)
     @patch('src.utils.utils.run_cmd', return_value='pruned')
     def test_prune_networks_confirmed(self, mock_run, *_):
-        from src.docker.docker_actions import prune_networks
+        from src.networks.actions import prune_networks
         prune_networks(self.show_output, parent=self.root, show_loading_callback=self.show_loading)
         mock_run.assert_called_once_with(DOCKER_NETWORK_PRUNE, True, FAKE_PW)
 
-    @patch('src.docker.docker_actions.check_docker_running', return_value=True)
+    @patch('src.networks.actions.check_docker_running', return_value=True)
     @patch('src.utils.utils.startThreadForTask', side_effect=_sync_thread)
     @patch('src.ui.ui_components.confirm_action_dialog', return_value=False)
     @patch('src.utils.utils.run_cmd', return_value='')
     def test_prune_networks_cancelled(self, mock_run, *_):
-        from src.docker.docker_actions import prune_networks
+        from src.networks.actions import prune_networks
         prune_networks(self.show_output, parent=self.root)
         mock_run.assert_not_called()
 
@@ -467,13 +467,13 @@ _FAKE_COMPOSE_JSON = (
 
 class TestComposeButtons(_Base):
 
-    @patch('src.docker.docker_tables.check_docker_running', return_value=True)
+    @patch('src.compose.tables.check_docker_running', return_value=True)
     @patch('src.utils.utils.startThreadForTask', side_effect=_sync_thread)
-    @patch('src.docker.docker_tables.get_sudo_password', return_value=FAKE_PW)
+    @patch('src.compose.tables.get_sudo_password', return_value=FAKE_PW)
     def test_show_compose_projects(self, *_):
         cb, calls = _table_cb()
-        from src.docker.docker_tables import show_compose_projects
-        with patch('src.docker.docker_tables.async_run',
+        from src.compose.tables import show_compose_projects
+        with patch('src.compose.tables.async_run',
                    side_effect=lambda *args, **_: args[1](_FAKE_COMPOSE_JSON)):
             show_compose_projects(cb, self.show_loading)
         self.assertTrue(calls)
@@ -481,13 +481,13 @@ class TestComposeButtons(_Base):
         self.assertEqual(len(calls[0]['rows']), 1)
         self.assertEqual(calls[0]['rows'][0][0], 'myapp')
 
-    @patch('src.docker.docker_tables.check_docker_running', return_value=True)
+    @patch('src.compose.tables.check_docker_running', return_value=True)
     @patch('src.utils.utils.startThreadForTask', side_effect=_sync_thread)
-    @patch('src.docker.docker_tables.get_sudo_password', return_value=FAKE_PW)
+    @patch('src.compose.tables.get_sudo_password', return_value=FAKE_PW)
     def test_show_compose_projects_empty(self, *_):
         cb, calls = _table_cb()
-        from src.docker.docker_tables import show_compose_projects
-        with patch('src.docker.docker_tables.async_run',
+        from src.compose.tables import show_compose_projects
+        with patch('src.compose.tables.async_run',
                    side_effect=lambda *args, **_: args[1]('[]')):
             show_compose_projects(cb, self.show_loading)
         self.assertTrue(calls)
@@ -508,32 +508,32 @@ _FAKE_DF_SIMPLE = (
 
 class TestStatsButtons(_Base):
 
-    @patch('src.docker.docker_tables.check_docker_running', return_value=True)
-    @patch('src.docker.docker_tables.run_cmd', return_value='abc123')  # running container IDs
+    @patch('src.stats.tables.check_docker_running', return_value=True)
+    @patch('src.stats.tables.run_cmd', return_value='abc123')  # running container IDs
     def test_container_stats(self, *_):
         cb, calls = _table_cb()
-        from src.docker.docker_tables import show_containers_with_stats
-        with patch('src.docker.docker_tables.async_run',
+        from src.stats.tables import show_containers_with_stats
+        with patch('src.stats.tables.async_run',
                    side_effect=lambda *args, **_: args[1](_FAKE_STATS_ROW)):
             show_containers_with_stats(cb, self.show_loading)
         self.assertTrue(calls)
         self.assertIn('CPU %', calls[0]['columns'])
         self.assertEqual(len(calls[0]['rows']), 1)
 
-    @patch('src.docker.docker_tables.check_docker_running', return_value=True)
-    @patch('src.docker.docker_tables.run_cmd', return_value='')  # no running containers
+    @patch('src.stats.tables.check_docker_running', return_value=True)
+    @patch('src.stats.tables.run_cmd', return_value='')  # no running containers
     def test_container_stats_empty_when_no_containers(self, *_):
         cb, calls = _table_cb()
-        from src.docker.docker_tables import show_containers_with_stats
+        from src.stats.tables import show_containers_with_stats
         show_containers_with_stats(cb, self.show_loading)
         self.assertTrue(calls)
         self.assertEqual(calls[0]['rows'], [])
 
-    @patch('src.docker.docker_tables.check_docker_running', return_value=True)
+    @patch('src.stats.tables.check_docker_running', return_value=True)
     def test_disk_storage_simple(self, *_):
         cb, calls = _table_cb()
-        from src.docker.docker_tables import show_docker_disk_storage_simple
-        with patch('src.docker.docker_tables.async_run',
+        from src.stats.tables import show_docker_disk_storage_simple
+        with patch('src.stats.tables.async_run',
                    side_effect=lambda *args, **_: args[1](_FAKE_DF_SIMPLE)):
             show_docker_disk_storage_simple(cb, self.show_loading)
         self.assertTrue(calls)
@@ -548,51 +548,51 @@ class TestStatsButtons(_Base):
 
 class TestDockerNotRunningGuard(_Base):
 
-    @patch('src.docker.docker_tables.check_docker_running', return_value=False)
+    @patch('src.containers.tables.check_docker_running', return_value=False)
     @patch('src.utils.utils.run_cmd')
     def test_containers_table_skipped(self, mock_run, _):
         cb, calls = _table_cb()
-        from src.docker.docker_tables import show_all_containers
+        from src.containers.tables import show_all_containers
         show_all_containers(cb, self.show_loading)
         mock_run.assert_not_called()
         self.assertEqual(calls, [])
 
-    @patch('src.docker.docker_tables.check_docker_running', return_value=False)
+    @patch('src.images.tables.check_docker_running', return_value=False)
     @patch('src.utils.utils.run_cmd')
     def test_images_table_skipped(self, mock_run, _):
         cb, calls = _table_cb()
-        from src.docker.docker_tables import show_images
+        from src.images.tables import show_images
         show_images(cb, self.show_loading)
         mock_run.assert_not_called()
         self.assertEqual(calls, [])
 
-    @patch('src.docker.docker_tables.check_docker_running', return_value=False)
+    @patch('src.networks.tables.check_docker_running', return_value=False)
     @patch('src.utils.utils.run_cmd')
     def test_networks_table_skipped(self, mock_run, _):
         cb, calls = _table_cb()
-        from src.docker.docker_tables import show_networks
+        from src.networks.tables import show_networks
         show_networks(cb, self.show_loading)
         mock_run.assert_not_called()
         self.assertEqual(calls, [])
 
-    @patch('src.docker.docker_actions.check_docker_running', return_value=False)
+    @patch('src.containers.actions.check_docker_running', return_value=False)
     @patch('src.utils.utils.run_cmd')
     def test_start_all_skipped(self, mock_run, _):
-        from src.docker.docker_actions import start_all_containers
+        from src.containers.actions import start_all_containers
         start_all_containers(self.show_output)
         mock_run.assert_not_called()
 
-    @patch('src.docker.docker_actions.check_docker_running', return_value=False)
+    @patch('src.volumes.actions.check_docker_running', return_value=False)
     @patch('src.utils.utils.run_cmd')
     def test_prune_volumes_skipped(self, mock_run, _):
-        from src.docker.docker_actions import prune_volumes
+        from src.volumes.actions import prune_volumes
         prune_volumes(self.show_output, parent=self.root)
         mock_run.assert_not_called()
 
-    @patch('src.docker.docker_actions.check_docker_running', return_value=False)
+    @patch('src.networks.actions.check_docker_running', return_value=False)
     @patch('src.utils.utils.run_cmd')
     def test_prune_networks_skipped(self, mock_run, _):
-        from src.docker.docker_actions import prune_networks
+        from src.networks.actions import prune_networks
         prune_networks(self.show_output, parent=self.root)
         mock_run.assert_not_called()
 
@@ -606,148 +606,147 @@ class TestTableCommandRouting(_Base):
 
     # --- show_table_command-based (containers, images, networks) ---
 
-    @patch('src.docker.docker_tables.check_docker_running', return_value=True)
-    @patch('src.docker.docker_tables.get_sudo_password', return_value=FAKE_PW)
-    @patch('src.docker.docker_tables.show_table_command')
+    @patch('src.containers.tables.check_docker_running', return_value=True)
+    @patch('src.containers.tables.get_sudo_password', return_value=FAKE_PW)
+    @patch('src.containers.tables.show_table_command')
     def test_running_containers_uses_correct_command(self, mock_cmd, *_):
-        from src.docker.docker_tables import show_running_containers
+        from src.containers.tables import show_running_containers
         show_running_containers(MagicMock(), self.show_loading)
         self.assertEqual(mock_cmd.call_args[0][0], DOCKER_PS_RUNNING)
 
-    @patch('src.docker.docker_tables.check_docker_running', return_value=True)
-    @patch('src.docker.docker_tables.get_sudo_password', return_value=FAKE_PW)
-    @patch('src.docker.docker_tables.show_table_command')
+    @patch('src.containers.tables.check_docker_running', return_value=True)
+    @patch('src.containers.tables.get_sudo_password', return_value=FAKE_PW)
+    @patch('src.containers.tables.show_table_command')
     def test_all_containers_uses_correct_command(self, mock_cmd, *_):
-        from src.docker.docker_tables import show_all_containers
+        from src.containers.tables import show_all_containers
         show_all_containers(MagicMock(), self.show_loading)
         self.assertEqual(mock_cmd.call_args[0][0], DOCKER_PS_ALL)
 
-    @patch('src.docker.docker_tables.check_docker_running', return_value=True)
-    @patch('src.docker.docker_tables.get_sudo_password', return_value=FAKE_PW)
-    @patch('src.docker.docker_tables.show_table_command')
+    @patch('src.containers.tables.check_docker_running', return_value=True)
+    @patch('src.containers.tables.get_sudo_password', return_value=FAKE_PW)
+    @patch('src.containers.tables.show_table_command')
     def test_stopped_containers_uses_correct_command(self, mock_cmd, *_):
-        from src.docker.docker_tables import show_stopped_containers
+        from src.containers.tables import show_stopped_containers
         show_stopped_containers(MagicMock(), self.show_loading)
         self.assertEqual(mock_cmd.call_args[0][0], DOCKER_PS_STOPPED)
 
-    @patch('src.docker.docker_tables.check_docker_running', return_value=True)
-    @patch('src.docker.docker_tables.get_sudo_password', return_value=FAKE_PW)
-    @patch('src.docker.docker_tables.show_table_command')
+    @patch('src.containers.tables.check_docker_running', return_value=True)
+    @patch('src.containers.tables.get_sudo_password', return_value=FAKE_PW)
+    @patch('src.containers.tables.show_table_command')
     def test_paused_containers_uses_correct_command(self, mock_cmd, *_):
-        from src.docker.docker_tables import show_paused_containers
+        from src.containers.tables import show_paused_containers
         show_paused_containers(MagicMock(), self.show_loading)
         self.assertEqual(mock_cmd.call_args[0][0], DOCKER_PS_PAUSED)
 
-    @patch('src.docker.docker_tables.check_docker_running', return_value=True)
-    @patch('src.docker.docker_tables.get_sudo_password', return_value=FAKE_PW)
-    @patch('src.docker.docker_tables.show_table_command')
+    @patch('src.images.tables.check_docker_running', return_value=True)
+    @patch('src.images.tables.get_sudo_password', return_value=FAKE_PW)
+    @patch('src.images.tables.show_table_command')
     def test_images_uses_correct_command(self, mock_cmd, *_):
-        from src.docker.docker_tables import show_images
+        from src.images.tables import show_images
         show_images(MagicMock(), self.show_loading)
         self.assertEqual(mock_cmd.call_args[0][0], DOCKER_IMAGES_ALL)
 
-    @patch('src.docker.docker_tables.check_docker_running', return_value=True)
-    @patch('src.docker.docker_tables.get_sudo_password', return_value=FAKE_PW)
-    @patch('src.docker.docker_tables.show_table_command')
+    @patch('src.networks.tables.check_docker_running', return_value=True)
+    @patch('src.networks.tables.get_sudo_password', return_value=FAKE_PW)
+    @patch('src.networks.tables.show_table_command')
     def test_networks_uses_correct_command(self, mock_cmd, *_):
-        from src.docker.docker_tables import show_networks
+        from src.networks.tables import show_networks
         show_networks(MagicMock(), self.show_loading)
         self.assertEqual(mock_cmd.call_args[0][0], DOCKER_NETWORK_LS)
 
     # --- async_run-based (volumes, compose, disk storage) ---
 
-    @patch('src.docker.docker_tables.check_docker_running', return_value=True)
-    @patch('src.docker.docker_tables.get_sudo_password', return_value=FAKE_PW)
-    @patch('src.docker.docker_tables.async_run')
+    @patch('src.volumes.tables.check_docker_running', return_value=True)
+    @patch('src.volumes.tables.get_sudo_password', return_value=FAKE_PW)
+    @patch('src.volumes.tables.async_run')
     def test_volumes_uses_correct_command(self, mock_async, *_):
-        from src.docker.docker_tables import show_volumes
+        from src.volumes.tables import show_volumes
         show_volumes(MagicMock(), self.show_loading)
         self.assertEqual(mock_async.call_args[0][0], DOCKER_DISK_USAGE_VERBOSE)
 
-    @patch('src.docker.docker_tables.check_docker_running', return_value=True)
-    @patch('src.docker.docker_tables.get_sudo_password', return_value=FAKE_PW)
-    @patch('src.docker.docker_tables.async_run')
+    @patch('src.volumes.tables.check_docker_running', return_value=True)
+    @patch('src.volumes.tables.get_sudo_password', return_value=FAKE_PW)
+    @patch('src.volumes.tables.async_run')
     def test_used_volumes_uses_correct_command(self, mock_async, *_):
-        from src.docker.docker_tables import show_used_volumes
+        from src.volumes.tables import show_used_volumes
         show_used_volumes(MagicMock(), self.show_loading)
         self.assertEqual(mock_async.call_args[0][0], DOCKER_DISK_USAGE_VERBOSE)
 
-    @patch('src.docker.docker_tables.check_docker_running', return_value=True)
-    @patch('src.docker.docker_tables.get_sudo_password', return_value=FAKE_PW)
-    @patch('src.docker.docker_tables.async_run')
+    @patch('src.volumes.tables.check_docker_running', return_value=True)
+    @patch('src.volumes.tables.get_sudo_password', return_value=FAKE_PW)
+    @patch('src.volumes.tables.async_run')
     def test_unused_volumes_uses_correct_command(self, mock_async, *_):
-        from src.docker.docker_tables import show_unused_volumes
+        from src.volumes.tables import show_unused_volumes
         show_unused_volumes(MagicMock(), self.show_loading)
         self.assertEqual(mock_async.call_args[0][0], DOCKER_DISK_USAGE_VERBOSE)
 
-    @patch('src.docker.docker_tables.check_docker_running', return_value=True)
-    @patch('src.docker.docker_tables.get_sudo_password', return_value=FAKE_PW)
-    @patch('src.docker.docker_tables.async_run')
+    @patch('src.compose.tables.check_docker_running', return_value=True)
+    @patch('src.compose.tables.get_sudo_password', return_value=FAKE_PW)
+    @patch('src.compose.tables.async_run')
     def test_compose_projects_uses_correct_command(self, mock_async, *_):
-        from src.docker.docker_tables import show_compose_projects
+        from src.compose.tables import show_compose_projects
         show_compose_projects(MagicMock(), self.show_loading)
         self.assertEqual(mock_async.call_args[0][0], DOCKER_COMPOSE_LS)
 
-    @patch('src.docker.docker_tables.check_docker_running', return_value=True)
-    @patch('src.docker.docker_tables.get_sudo_password', return_value=FAKE_PW)
-    @patch('src.docker.docker_tables.async_run')
+    @patch('src.stats.tables.check_docker_running', return_value=True)
+    @patch('src.stats.tables.async_run')
     def test_disk_storage_simple_uses_correct_command(self, mock_async, *_):
-        from src.docker.docker_tables import show_docker_disk_storage_simple
+        from src.stats.tables import show_docker_disk_storage_simple
         show_docker_disk_storage_simple(MagicMock(), self.show_loading)
         self.assertEqual(mock_async.call_args[0][0], DOCKER_DISK_STORAGE_SIMPLE)
 
     # --- internal run_cmd routing (DOCKER_PS_IDS_RUNNING, DOCKER_PS_IDS_ALL, DOCKER_PS_NAMES_ALL) ---
 
-    @patch('src.docker.docker_tables.check_docker_running', return_value=True)
-    @patch('src.docker.docker_tables.get_sudo_password', return_value=FAKE_PW)
-    @patch('src.docker.docker_tables.async_run')  # prevent actual async call
-    @patch('src.docker.docker_tables.run_cmd', return_value='abc123')
+    @patch('src.stats.tables.check_docker_running', return_value=True)
+    @patch('src.stats.tables.get_sudo_password', return_value=FAKE_PW)
+    @patch('src.stats.tables.async_run')  # prevent actual async call
+    @patch('src.stats.tables.run_cmd', return_value='abc123')
     def test_container_stats_checks_running_ids(self, mock_run, *_):
-        from src.docker.docker_tables import show_containers_with_stats
+        from src.stats.tables import show_containers_with_stats
         show_containers_with_stats(MagicMock(), self.show_loading)
-        mock_run.assert_called_once_with(DOCKER_PS_IDS_RUNNING)
+        mock_run.assert_called_once_with(DOCKER_PS_IDS_RUNNING, sudo=True, sudo_password=FAKE_PW)
 
-    @patch('src.docker.docker_tables.check_docker_running', return_value=True)
-    @patch('src.docker.docker_tables.get_sudo_password', return_value=FAKE_PW)
-    @patch('src.docker.docker_tables.run_cmd', return_value='abc123')  # running found → triggers async
-    @patch('src.docker.docker_tables.async_run')
+    @patch('src.stats.tables.check_docker_running', return_value=True)
+    @patch('src.stats.tables.get_sudo_password', return_value=FAKE_PW)
+    @patch('src.stats.tables.run_cmd', return_value='abc123')  # running found → triggers async
+    @patch('src.stats.tables.async_run')
     def test_container_stats_uses_correct_async_command(self, mock_async, *_):
-        from src.docker.docker_tables import show_containers_with_stats
+        from src.stats.tables import show_containers_with_stats
         show_containers_with_stats(MagicMock(), self.show_loading)
         self.assertEqual(mock_async.call_args[0][0], DOCKER_STATS_NO_STREAM)
 
-    @patch('src.docker.docker_tables.check_docker_running', return_value=True)
-    @patch('src.docker.docker_tables.get_sudo_password', return_value=FAKE_PW)
-    @patch('src.docker.docker_tables.run_cmd', return_value='')
+    @patch('src.images.tables.check_docker_running', return_value=True)
+    @patch('src.images.tables.get_sudo_password', return_value=FAKE_PW)
+    @patch('src.images.tables.run_cmd', return_value='')
     def test_unused_images_queries_container_ids(self, mock_run, *_):
         cb, _ = _table_cb()
-        from src.docker.docker_tables import show_unused_images
-        with patch('src.docker.docker_tables.async_run',
+        from src.images.tables import show_unused_images
+        with patch('src.images.tables.async_run',
                    side_effect=lambda *args, **_: args[1](_FAKE_IMAGE_ROWS)):
             show_unused_images(cb, self.show_loading)
-        mock_run.assert_called_once_with(DOCKER_PS_IDS_ALL)
+        mock_run.assert_called_once_with(DOCKER_PS_IDS_ALL, sudo=True, sudo_password=FAKE_PW)
 
-    @patch('src.docker.docker_tables.check_docker_running', return_value=True)
-    @patch('src.docker.docker_tables.get_sudo_password', return_value=FAKE_PW)
-    @patch('src.docker.docker_tables.run_cmd', return_value='')
+    @patch('src.images.tables.check_docker_running', return_value=True)
+    @patch('src.images.tables.get_sudo_password', return_value=FAKE_PW)
+    @patch('src.images.tables.run_cmd', return_value='')
     def test_used_images_queries_container_ids(self, mock_run, *_):
         cb, _ = _table_cb()
-        from src.docker.docker_tables import show_used_images
-        with patch('src.docker.docker_tables.async_run',
+        from src.images.tables import show_used_images
+        with patch('src.images.tables.async_run',
                    side_effect=lambda *args, **_: args[1](_FAKE_IMAGE_ROWS)):
             show_used_images(cb, self.show_loading)
-        mock_run.assert_called_once_with(DOCKER_PS_IDS_ALL)
+        mock_run.assert_called_once_with(DOCKER_PS_IDS_ALL, sudo=True, sudo_password=FAKE_PW)
 
-    @patch('src.docker.docker_tables.check_docker_running', return_value=True)
-    @patch('src.docker.docker_tables.get_sudo_password', return_value=FAKE_PW)
-    @patch('src.docker.docker_tables.run_cmd', return_value='')
+    @patch('src.volumes.tables.check_docker_running', return_value=True)
+    @patch('src.volumes.tables.get_sudo_password', return_value=FAKE_PW)
+    @patch('src.volumes.tables.run_cmd', return_value='')
     def test_volumes_callback_queries_container_names(self, mock_run, *_):
         cb, _ = _table_cb()
-        from src.docker.docker_tables import show_volumes
-        with patch('src.docker.docker_tables.async_run',
+        from src.volumes.tables import show_volumes
+        with patch('src.volumes.tables.async_run',
                    side_effect=lambda *args, **_: args[1](_FAKE_DF_VOLUMES)):
             show_volumes(cb, self.show_loading)
-        mock_run.assert_called_once_with(DOCKER_PS_NAMES_ALL)
+        mock_run.assert_called_once_with(DOCKER_PS_NAMES_ALL, sudo=True, sudo_password=FAKE_PW)
 
 
 # ===========================================================================
@@ -756,18 +755,18 @@ class TestTableCommandRouting(_Base):
 
 class TestCleanAllResources(_Base):
 
-    @patch('src.docker.docker_actions.check_docker_running', return_value=True)
-    @patch('src.docker.docker_actions.get_sudo_password', return_value=FAKE_PW)
+    @patch('src.docker.actions.check_docker_running', return_value=True)
+    @patch('src.docker.actions.get_sudo_password', return_value=FAKE_PW)
     @patch('src.ui.ui_components.confirm_action_dialog', return_value=True)
     def test_clean_all_runs_full_sequence(self, *_):
-        from src.docker.docker_actions import clean_all_resources
+        from src.docker.actions import clean_all_resources
         commands_called = []
 
         def track_async(cmd, cb, **_):
             commands_called.append(cmd)
             cb('')
 
-        with patch('src.docker.docker_actions.async_run', side_effect=track_async):
+        with patch('src.docker.actions.async_run', side_effect=track_async):
             clean_all_resources(self.show_output, parent=self.root,
                                 show_loading_callback=self.show_loading)
 
@@ -776,11 +775,11 @@ class TestCleanAllResources(_Base):
         self.assertIn(DOCKER_RMI_ALL_SAFE, commands_called)
         self.assertIn(DOCKER_VOLUME_RM_ALL_SAFE, commands_called)
 
-    @patch('src.docker.docker_actions.check_docker_running', return_value=True)
+    @patch('src.docker.actions.check_docker_running', return_value=True)
     @patch('src.ui.ui_components.confirm_action_dialog', return_value=False)
     def test_clean_all_cancelled_runs_nothing(self, *_):
-        from src.docker.docker_actions import clean_all_resources
-        with patch('src.docker.docker_actions.async_run') as mock_async:
+        from src.docker.actions import clean_all_resources
+        with patch('src.docker.actions.async_run') as mock_async:
             clean_all_resources(self.show_output, parent=self.root)
         mock_async.assert_not_called()
 
@@ -791,15 +790,15 @@ class TestCleanAllResources(_Base):
 
 class TestDeleteUsedVolumes(_Base):
 
-    @patch('src.docker.docker_actions.check_docker_running', return_value=True)
-    @patch('src.docker.docker_actions.startThreadForTask', side_effect=_sync_thread)
-    @patch('src.docker.docker_actions.get_sudo_password', return_value=FAKE_PW)
+    @patch('src.volumes.actions.check_docker_running', return_value=True)
+    @patch('src.volumes.actions.startThreadForTask', side_effect=_sync_thread)
+    @patch('src.volumes.actions.get_sudo_password', return_value=FAKE_PW)
     @patch('src.ui.ui_components.confirm_action_dialog', return_value=True)
     def test_delete_used_volumes_queries_correct_commands(self, *_):
-        from src.docker.docker_actions import delete_used_volumes
+        from src.volumes.actions import delete_used_volumes
 
         # Return values in call order: LS_IDS → LS_DANGLING → rm (deletion)
-        with patch('src.docker.docker_actions.run_cmd',
+        with patch('src.volumes.actions.run_cmd',
                    side_effect=['vol1\nvol2', 'vol2', '']) as mock_run:
             delete_used_volumes(self.show_output, parent=self.root,
                                 show_loading_callback=self.show_loading)
@@ -808,11 +807,11 @@ class TestDeleteUsedVolumes(_Base):
         self.assertIn(DOCKER_VOLUME_LS_IDS, issued)
         self.assertIn(DOCKER_VOLUME_LS_DANGLING, issued)
 
-    @patch('src.docker.docker_actions.check_docker_running', return_value=True)
+    @patch('src.volumes.actions.check_docker_running', return_value=True)
     @patch('src.ui.ui_components.confirm_action_dialog', return_value=False)
     def test_delete_used_volumes_cancelled_runs_nothing(self, *_):
-        from src.docker.docker_actions import delete_used_volumes
-        with patch('src.docker.docker_actions.run_cmd') as mock_run:
+        from src.volumes.actions import delete_used_volumes
+        with patch('src.volumes.actions.run_cmd') as mock_run:
             delete_used_volumes(self.show_output, parent=self.root)
         mock_run.assert_not_called()
 
@@ -828,7 +827,7 @@ class TestSelectedItemActions(_Base):
         super().setUp()
         self._common_patches = [
             patch('src.config.config_manager.get_sudo_password', return_value=FAKE_PW),
-            patch('src.docker.docker_gui_features.check_docker_running', return_value=True),
+            patch('src.shared.item_actions.check_docker_running', return_value=True),
         ]
         for p in self._common_patches:
             p.start()
@@ -849,7 +848,7 @@ class TestSelectedItemActions(_Base):
         return dm
 
     def _build(self, dm):
-        from src.docker.docker_gui_features import create_selected_item_actions
+        from src.shared.item_actions import create_selected_item_actions
         btns, _ = create_selected_item_actions(
             ttk.Frame(self.root), self.root, dm, MagicMock(), MagicMock()
         )
@@ -857,7 +856,7 @@ class TestSelectedItemActions(_Base):
 
     # --- Container action buttons ---
 
-    @patch('src.docker.docker_gui_features.run_docker_cmd')
+    @patch('src.shared.item_actions.run_docker_cmd')
     def test_start_container(self, mock_run):
         btns = self._build(self._dm('container', _F_CONTAINER))
         btns['start'].invoke()
@@ -869,7 +868,7 @@ class TestSelectedItemActions(_Base):
             cmd,
         )
 
-    @patch('src.docker.docker_gui_features.run_docker_cmd')
+    @patch('src.shared.item_actions.run_docker_cmd')
     def test_stop_container(self, mock_run):
         btns = self._build(self._dm('container', _F_CONTAINER))
         btns['stop'].invoke()
@@ -881,7 +880,7 @@ class TestSelectedItemActions(_Base):
             cmd,
         )
 
-    @patch('src.docker.docker_gui_features.run_docker_cmd')
+    @patch('src.shared.item_actions.run_docker_cmd')
     def test_restart_container(self, mock_run):
         btns = self._build(self._dm('container', _F_CONTAINER))
         btns['restart'].invoke()
@@ -893,7 +892,7 @@ class TestSelectedItemActions(_Base):
             cmd,
         )
 
-    @patch('src.docker.docker_gui_features.run_docker_cmd')
+    @patch('src.shared.item_actions.run_docker_cmd')
     def test_pause_container(self, mock_run):
         btns = self._build(self._dm('container', _F_CONTAINER))
         btns['pause'].invoke()
@@ -905,7 +904,7 @@ class TestSelectedItemActions(_Base):
             cmd,
         )
 
-    @patch('src.docker.docker_gui_features.run_docker_cmd')
+    @patch('src.shared.item_actions.run_docker_cmd')
     def test_unpause_container(self, mock_run):
         btns = self._build(self._dm('container', _F_CONTAINER))
         btns['unpause'].invoke()
@@ -917,7 +916,7 @@ class TestSelectedItemActions(_Base):
             cmd,
         )
 
-    @patch('src.docker.docker_gui_features.run_docker_cmd')
+    @patch('src.shared.item_actions.run_docker_cmd')
     def test_inspect_container(self, mock_run):
         btns = self._build(self._dm('container', _F_CONTAINER))
         btns['inspect_container'].invoke()
@@ -929,8 +928,8 @@ class TestSelectedItemActions(_Base):
             cmd,
         )
 
-    @patch('src.ui.ui_components.confirm_action_dialog', return_value=True)
-    @patch('src.docker.docker_gui_features.run_docker_cmd')
+    @patch('src.shared.item_actions.confirm_action_dialog', return_value=True)
+    @patch('src.shared.item_actions.run_docker_cmd')
     def test_delete_container_confirmed(self, mock_run, *_):
         btns = self._build(self._dm('container', _F_CONTAINER))
         btns['delete'].invoke()
@@ -942,8 +941,8 @@ class TestSelectedItemActions(_Base):
             cmd,
         )
 
-    @patch('src.ui.ui_components.confirm_action_dialog', return_value=False)
-    @patch('src.docker.docker_gui_features.run_docker_cmd')
+    @patch('src.shared.item_actions.confirm_action_dialog', return_value=False)
+    @patch('src.shared.item_actions.run_docker_cmd')
     def test_delete_container_cancelled(self, mock_run, *_):
         btns = self._build(self._dm('container', _F_CONTAINER))
         btns['delete'].invoke()
@@ -951,7 +950,7 @@ class TestSelectedItemActions(_Base):
 
     # --- Image action buttons ---
 
-    @patch('src.docker.docker_gui_features.run_docker_cmd')
+    @patch('src.shared.item_actions.run_docker_cmd')
     def test_inspect_image(self, mock_run):
         btns = self._build(self._dm('image', _F_IMAGE))
         btns['inspect_image'].invoke()
@@ -963,7 +962,7 @@ class TestSelectedItemActions(_Base):
             cmd,
         )
 
-    @patch('src.docker.docker_gui_features.run_docker_cmd')
+    @patch('src.shared.item_actions.run_docker_cmd')
     def test_history_image(self, mock_run):
         btns = self._build(self._dm('image', _F_IMAGE))
         btns['history_image'].invoke()
@@ -975,8 +974,8 @@ class TestSelectedItemActions(_Base):
             cmd,
         )
 
-    @patch('src.ui.ui_components.confirm_action_dialog', return_value=True)
-    @patch('src.docker.docker_gui_features.run_docker_cmd')
+    @patch('src.shared.item_actions.confirm_action_dialog', return_value=True)
+    @patch('src.shared.item_actions.run_docker_cmd')
     def test_delete_image_confirmed(self, mock_run, *_):
         btns = self._build(self._dm('image', _F_IMAGE))
         btns['delete_image'].invoke()
@@ -988,15 +987,15 @@ class TestSelectedItemActions(_Base):
             cmd,
         )
 
-    @patch('src.ui.ui_components.confirm_action_dialog', return_value=False)
-    @patch('src.docker.docker_gui_features.run_docker_cmd')
+    @patch('src.shared.item_actions.confirm_action_dialog', return_value=False)
+    @patch('src.shared.item_actions.run_docker_cmd')
     def test_delete_image_cancelled(self, mock_run, *_):
         btns = self._build(self._dm('image', _F_IMAGE))
         btns['delete_image'].invoke()
         mock_run.assert_not_called()
 
     @patch('tkinter.filedialog.asksaveasfilename', return_value='/tmp/nginx_latest.tar')
-    @patch('src.docker.docker_gui_features.run_docker_cmd')
+    @patch('src.shared.item_actions.run_docker_cmd')
     def test_save_image(self, mock_run, *_):
         btns = self._build(self._dm('image', _F_IMAGE))
         btns['save_image'].invoke()
@@ -1011,7 +1010,7 @@ class TestSelectedItemActions(_Base):
 
     # --- Volume action buttons ---
 
-    @patch('src.docker.docker_gui_features.run_docker_cmd')
+    @patch('src.shared.item_actions.run_docker_cmd')
     def test_inspect_volume(self, mock_run):
         btns = self._build(self._dm('volume', _F_VOLUME))
         btns['inspect_volume'].invoke()
@@ -1023,8 +1022,8 @@ class TestSelectedItemActions(_Base):
             cmd,
         )
 
-    @patch('src.ui.ui_components.confirm_action_dialog', return_value=True)
-    @patch('src.docker.docker_gui_features.run_docker_cmd')
+    @patch('src.shared.item_actions.confirm_action_dialog', return_value=True)
+    @patch('src.shared.item_actions.run_docker_cmd')
     def test_delete_volume_confirmed(self, mock_run, *_):
         btns = self._build(self._dm('volume', _F_VOLUME))
         btns['delete_volume'].invoke()
@@ -1036,8 +1035,8 @@ class TestSelectedItemActions(_Base):
             cmd,
         )
 
-    @patch('src.ui.ui_components.confirm_action_dialog', return_value=False)
-    @patch('src.docker.docker_gui_features.run_docker_cmd')
+    @patch('src.shared.item_actions.confirm_action_dialog', return_value=False)
+    @patch('src.shared.item_actions.run_docker_cmd')
     def test_delete_volume_cancelled(self, mock_run, *_):
         btns = self._build(self._dm('volume', _F_VOLUME))
         btns['delete_volume'].invoke()
@@ -1045,7 +1044,7 @@ class TestSelectedItemActions(_Base):
 
     # --- Network action buttons ---
 
-    @patch('src.docker.docker_gui_features.run_docker_cmd')
+    @patch('src.shared.item_actions.run_docker_cmd')
     def test_inspect_network(self, mock_run):
         btns = self._build(self._dm('network', _F_NETWORK))
         btns['inspect_network'].invoke()
@@ -1057,8 +1056,8 @@ class TestSelectedItemActions(_Base):
             cmd,
         )
 
-    @patch('src.ui.ui_components.confirm_action_dialog', return_value=True)
-    @patch('src.docker.docker_gui_features.run_docker_cmd')
+    @patch('src.shared.item_actions.confirm_action_dialog', return_value=True)
+    @patch('src.shared.item_actions.run_docker_cmd')
     def test_delete_network_confirmed(self, mock_run, *_):
         btns = self._build(self._dm('network', _F_NETWORK))
         btns['delete_network'].invoke()
@@ -1070,8 +1069,8 @@ class TestSelectedItemActions(_Base):
             cmd,
         )
 
-    @patch('src.ui.ui_components.confirm_action_dialog', return_value=False)
-    @patch('src.docker.docker_gui_features.run_docker_cmd')
+    @patch('src.shared.item_actions.confirm_action_dialog', return_value=False)
+    @patch('src.shared.item_actions.run_docker_cmd')
     def test_delete_network_cancelled(self, mock_run, *_):
         btns = self._build(self._dm('network', _F_NETWORK))
         btns['delete_network'].invoke()
@@ -1079,9 +1078,9 @@ class TestSelectedItemActions(_Base):
 
     # --- stop_using image  (DOCKER_INSPECT_ANCESTOR → DOCKER_CONTAINER_STOP) ---
 
-    @patch('src.ui.ui_components.confirm_action_dialog', return_value=True)
-    @patch('src.docker.docker_gui_features.run_docker_cmd')
-    @patch('src.docker.docker_gui_features.run_cmd', return_value='cont1\ncont2')
+    @patch('src.shared.item_actions.confirm_action_dialog', return_value=True)
+    @patch('src.shared.item_actions.run_docker_cmd')
+    @patch('src.shared.item_actions.run_cmd', return_value='cont1\ncont2')
     def test_stop_using_image(self, mock_cmd_run, mock_docker_run, *_):
         btns = self._build(self._dm('image', _F_IMAGE))
         btns['stop_using'].invoke()
@@ -1097,8 +1096,8 @@ class TestSelectedItemActions(_Base):
 
     # --- run multi-image  (DOCKER_RUN_DETACHED) ---
 
-    @patch('src.ui.ui_components.confirm_action_dialog', return_value=True)
-    @patch('src.docker.docker_gui_features.run_docker_cmd')
+    @patch('src.shared.item_actions.confirm_action_dialog', return_value=True)
+    @patch('src.shared.item_actions.run_docker_cmd')
     def test_run_multi_image(self, mock_run, *_):
         btns = self._build(self._dm('image', _F_IMAGE, two_rows=True))
         btns['run'].invoke()
@@ -1110,7 +1109,7 @@ class TestSelectedItemActions(_Base):
 
     # --- Compose action buttons ---
 
-    @patch('src.docker.docker_gui_features.run_docker_cmd')
+    @patch('src.shared.item_actions.run_docker_cmd')
     def test_compose_up(self, mock_run):
         btns = self._build(self._dm('compose', _F_COMPOSE))
         btns['compose_up'].invoke()
@@ -1123,7 +1122,7 @@ class TestSelectedItemActions(_Base):
             cmd,
         )
 
-    @patch('src.docker.docker_gui_features.run_docker_cmd')
+    @patch('src.shared.item_actions.run_docker_cmd')
     def test_compose_down(self, mock_run):
         btns = self._build(self._dm('compose', _F_COMPOSE))
         btns['compose_down'].invoke()
@@ -1136,7 +1135,7 @@ class TestSelectedItemActions(_Base):
             cmd,
         )
 
-    @patch('src.docker.docker_gui_features.run_docker_cmd')
+    @patch('src.shared.item_actions.run_docker_cmd')
     def test_compose_restart(self, mock_run):
         btns = self._build(self._dm('compose', _F_COMPOSE))
         btns['compose_restart'].invoke()
@@ -1149,7 +1148,7 @@ class TestSelectedItemActions(_Base):
             cmd,
         )
 
-    @patch('src.docker.docker_gui_features.run_docker_cmd')
+    @patch('src.shared.item_actions.run_docker_cmd')
     def test_compose_logs(self, mock_run):
         btns = self._build(self._dm('compose', _F_COMPOSE))
         btns['compose_logs'].invoke()
@@ -1162,7 +1161,7 @@ class TestSelectedItemActions(_Base):
             cmd,
         )
 
-    @patch('src.docker.docker_gui_features.async_run')
+    @patch('src.shared.item_actions.async_run')
     def test_compose_services(self, mock_async):
         btns = self._build(self._dm('compose', _F_COMPOSE))
         btns['compose_services'].invoke()
@@ -1175,7 +1174,7 @@ class TestSelectedItemActions(_Base):
             cmd,
         )
 
-    @patch('src.docker.docker_gui_features.run_docker_cmd')
+    @patch('src.shared.item_actions.run_docker_cmd')
     def test_compose_config(self, mock_run):
         btns = self._build(self._dm('compose', _F_COMPOSE))
         btns['compose_inspect'].invoke()
@@ -1196,15 +1195,15 @@ class TestSelectedItemActions(_Base):
 class TestInspectCallbackRouting(_Base):
     """Verifies DOCKER_INSPECT_IMAGE and DOCKER_INSPECT_MOUNTS are used inside async callbacks."""
 
-    @patch('src.docker.docker_tables.check_docker_running', return_value=True)
-    @patch('src.docker.docker_tables.get_sudo_password', return_value=FAKE_PW)
+    @patch('src.images.tables.check_docker_running', return_value=True)
+    @patch('src.images.tables.get_sudo_password', return_value=FAKE_PW)
     def test_used_images_callback_uses_inspect_image(self, *_):
         cb, _ = _table_cb()
-        from src.docker.docker_tables import show_used_images
+        from src.images.tables import show_used_images
         fake_images = 'nginx\tlatest\tabc123def456\t100MB'
-        with patch('src.docker.docker_tables.async_run',
+        with patch('src.images.tables.async_run',
                    side_effect=lambda *args, **_: args[1](fake_images)), \
-             patch('src.docker.docker_tables.run_cmd',
+             patch('src.images.tables.run_cmd',
                    side_effect=['c1a2b3', 'sha256:abc123def456']) as mock_run:
             show_used_images(cb, self.show_loading)
         # First call: PS_IDS_ALL to discover which containers exist
@@ -1213,14 +1212,14 @@ class TestInspectCallbackRouting(_Base):
         inspect_cmd = mock_run.call_args_list[1][0][0]
         self.assertEqual(inspect_cmd, DOCKER_INSPECT_IMAGE.format(container_id='c1a2b3'))
 
-    @patch('src.docker.docker_tables.check_docker_running', return_value=True)
-    @patch('src.docker.docker_tables.get_sudo_password', return_value=FAKE_PW)
+    @patch('src.volumes.tables.check_docker_running', return_value=True)
+    @patch('src.volumes.tables.get_sudo_password', return_value=FAKE_PW)
     def test_volumes_callback_uses_inspect_mounts(self, *_):
         cb, _ = _table_cb()
-        from src.docker.docker_tables import show_volumes
-        with patch('src.docker.docker_tables.async_run',
+        from src.volumes.tables import show_volumes
+        with patch('src.volumes.tables.async_run',
                    side_effect=lambda *args, **_: args[1](_FAKE_DF_VOLUMES)), \
-             patch('src.docker.docker_tables.run_cmd',
+             patch('src.volumes.tables.run_cmd',
                    side_effect=['mycontainer', '[]']) as mock_run:
             show_volumes(cb, self.show_loading)
         # First call: PS_NAMES_ALL to get container names

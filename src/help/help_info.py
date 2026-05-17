@@ -10,8 +10,8 @@ help_info = """
 ── GETTING STARTED ──────────────────────────────────
 
   1. Launch the app and enter your sudo password
-     (it is stored securely in ~/.docker-gui/ with
-     0600 permissions — only you can read it).
+     (stored securely in ~/.docker-gui/config.json
+     with 0600 permissions — only you can read it).
   2. The sidebar shows the Docker service status
      (Running ✅ or Stopped ❌) at the top.
   3. Click a sidebar category to explore resources.
@@ -32,6 +32,7 @@ help_info = """
     View all, used, or unused images. Pull from
     Docker Hub, build from Dockerfile, load from
     archive, prune dangling layers, or delete all.
+    Use Search Hub to find images with size info.
 
   💾 Volumes
     View all, used, or unused volumes. Create new
@@ -49,6 +50,10 @@ help_info = """
     Live container resource usage (CPU, memory,
     network I/O, block I/O). Also view detailed
     Docker disk usage.
+
+  💻 Terminal
+    Built-in terminal panel for quick commands
+    without leaving the app.
 
 ── TABLE ACTIONS ────────────────────────────────────
 
@@ -72,6 +77,16 @@ help_info = """
 
   Compose projects:
     Up · Down · Restart · Logs · Services · Config
+
+── PULL & BUILD STATUS ──────────────────────────────
+
+  When a pull or build is started, a streaming log
+  window opens. You can close it at any time — the
+  operation keeps running in the background.
+
+  To reopen the progress window after closing:
+    Images → Pull Status  (for docker pull)
+    Images → Build Status (for docker build)
 
 ── SEARCH & FILTER ──────────────────────────────────
 
@@ -120,7 +135,8 @@ help_info = """
   restored on next launch.
 
   Available themes:
-    Default · Dark · Light Alt · Classic · Clam Light
+    Darkly · Superhero · Solar · Vapor
+    Cosmo · Flatly
 
 ── PASSWORD MANAGEMENT ──────────────────────────────
 
