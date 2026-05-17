@@ -105,6 +105,7 @@ from src.docker.docker_gui_features import (
     search_hub_dialog,
     build_image_dialog,
     reopen_latest_build_status_window,
+    reopen_latest_pull_status_window,
     load_image_dialog,
     create_volume_dialog,
     create_network_dialog,
@@ -153,6 +154,7 @@ class DockerGUI:
         self.sidebar_buttons = {}
         self.sidebar_indicators = {}
         self.sidebar_row_frames = {}
+        self.sidebar_icon_labels = {}
         self.active_category = None
         self.category_buttons = {}
         self.active_sidebar_button_ref = {'button': None}
@@ -201,6 +203,14 @@ class DockerGUI:
         self.style = ttkbs.Style()  # returns the singleton created by Window
         self.current_theme = self.initial_theme
         self._configure_treeview_grid(themes[self.current_theme])
+        for style_name in (
+            "TButton", "primary.TButton", "secondary.TButton", "success.TButton",
+            "danger.TButton", "warning.TButton", "info.TButton",
+            "primary.Outline.TButton", "secondary.Outline.TButton",
+            "success.Outline.TButton", "danger.Outline.TButton",
+            "warning.Outline.TButton", "info.Outline.TButton",
+        ):
+            self.style.configure(style_name, padding=(6, 2))
     
     def _configure_treeview_grid(self, theme):
         """Apply cell-border / grid-line styling to the Treeview widget."""
@@ -288,7 +298,8 @@ class DockerGUI:
             lambda: show_used_images(self.display_manager.show_table, self.show_loading),
             lambda: show_unused_images(self.display_manager.show_table, self.show_loading),
             lambda: pull_image_dialog(self.root, lambda: show_images(self.display_manager.show_table, self.show_loading)),
-            lambda: search_hub_dialog(self.root, lambda: show_images(self.display_manager.show_table, self.show_loading)),
+            lambda: search_hub_dialog(self.root, lambda: show_images(self.display_manager.show_table, self.show_loading), self.display_manager.show_text_output),
+            lambda: reopen_latest_pull_status_window(self.root),
             lambda: build_image_dialog(
                 self.root,
                 self.display_manager.show_text_output,
@@ -357,15 +368,30 @@ class DockerGUI:
             indicator = tk.Frame(row_frame, width=4, bg=theme["sidebar_bg"])
             indicator.pack(side=tk.LEFT, fill=tk.Y)
 
+            # Fixed-width icon cell so all category labels start at the same X
+            icon_cell = tk.Frame(row_frame, width=28, bg=theme["sidebar_bg"])
+            icon_cell.pack(side=tk.LEFT, fill=tk.Y, padx=(4, 0))
+            icon_cell.pack_propagate(False)
+            icon_lbl = tk.Label(icon_cell, text=icon, font=("Arial", 11),
+                                bg=theme["sidebar_bg"], fg=theme["text_fg"],
+                                anchor="center")
+            icon_lbl.pack(fill=tk.BOTH, expand=True)
+
             btn = ttk.Button(
-                row_frame, text=f"  {icon}  {category}",
+                row_frame, text=f" {category}",
                 command=self.make_sidebar_command(category),
             )
-            btn.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(4, 0))
+            btn.pack(side=tk.LEFT, fill=tk.X, expand=True)
+
+            # Forward icon clicks to the button
+            cmd = self.make_sidebar_command(category)
+            icon_cell.bind("<Button-1>", lambda e, c=cmd: c())
+            icon_lbl.bind("<Button-1>", lambda e, c=cmd: c())
 
             self.sidebar_buttons[category] = btn
             self.sidebar_indicators[category] = indicator
             self.sidebar_row_frames[category] = row_frame
+            self.sidebar_icon_labels[category] = icon_lbl
             if category in SIDEBAR_TOOLTIPS:
                 Tooltip(btn, SIDEBAR_TOOLTIPS[category])
         
@@ -863,7 +889,7 @@ class DockerGUI:
                 elif isinstance(child, tk.Label):
                     child.configure(bg=theme["sidebar_bg"])
 
-        # Repaint sidebar row frames and accent indicators for the new theme
+        # Repaint sidebar row frames, accent indicators, and icon labels for the new theme
         for cat in self.sidebar_buttons:
             if cat in self.sidebar_row_frames and self.sidebar_row_frames[cat].winfo_exists():
                 self.sidebar_row_frames[cat].configure(bg=theme["sidebar_bg"])
@@ -871,6 +897,10 @@ class DockerGUI:
                 is_active = (cat == self.active_category)
                 self.sidebar_indicators[cat].configure(
                     bg=theme["indicator_color"] if is_active else theme["sidebar_bg"]
+                )
+            if cat in self.sidebar_icon_labels and self.sidebar_icon_labels[cat].winfo_exists():
+                self.sidebar_icon_labels[cat].configure(
+                    bg=theme["sidebar_bg"], fg=theme["text_fg"]
                 )
         if hasattr(self, 'sidebar_status_label') and self.sidebar_status_label.winfo_exists():
             self.sidebar_status_label.configure(bg=theme["sidebar_bg"])
@@ -973,8 +1003,7 @@ class DockerGUI:
                 self.btn_frame, text="🗑 Clear",
                 style="secondary.TButton",
                 command=self._terminal_panel.clear,
-            ).grid(row=0, column=0, padx=5, pady=5, sticky="ew")
-            self.btn_frame.columnconfigure(0, weight=1)
+            ).grid(row=0, column=0, padx=2, pady=1)
             return
 
         # Update label
@@ -987,7 +1016,7 @@ class DockerGUI:
         _WARN_WORDS = ("stop",)
         _SUCCESS_WORDS = ("start", "run", "pull")
 
-        max_cols = 7
+        max_cols = 12
         for i, (text, cmd) in enumerate(buttons):
             def make_command(command, btn_text):
                 def wrapper():
@@ -1028,7 +1057,7 @@ class DockerGUI:
             
             btn = ttk.Button(self.btn_frame, text=text, style=init_style,
                              command=make_command(cmd, text))
-            btn.grid(row=i // max_cols, column=i % max_cols, padx=5, pady=5, sticky="ew")
+            btn.grid(row=i // max_cols, column=i % max_cols, padx=4, pady=1)
             self.category_buttons[text] = btn
             enable_button_enter_key(btn)
             tip_text = CATEGORY_TOOLTIPS.get(category, {}).get(text)
@@ -1042,7 +1071,7 @@ class DockerGUI:
                 cmd()
         
         for i in range(max_cols):
-            self.btn_frame.columnconfigure(i, weight=1)
+            self.btn_frame.columnconfigure(i, weight=0)
     
     def select_initial_category(self):
         """Select Docker category on startup"""
