@@ -68,6 +68,12 @@ commands_info = """
   docker commit <container> <image:tag>
     Create a new image from a container
 
+  docker cp <container>:<src> <dest>
+    Copy files from a container to the host
+
+  docker cp <src> <container>:<dest>
+    Copy files from the host to a container
+
   docker stats
     Show live container resource usage
 
@@ -85,11 +91,20 @@ commands_info = """
   docker pull <image>:<tag>
     Download a specific image tag
 
+  docker search <term>
+    Search Docker Hub for images
+
+  docker push <image>
+    Push a local image to a registry
+
   docker build -t <name:tag> <context>
     Build an image from a Dockerfile
 
   docker build -t <name:tag> -f <Dockerfile> .
     Build using a specific Dockerfile path
+
+  docker build --build-arg KEY=val .
+    Pass build-time variables to a Dockerfile
 
   docker load -i <archive.tar>
     Import an image from a tar archive
@@ -109,7 +124,7 @@ commands_info = """
   docker image prune -a
     Remove all unused images
 
-  docker inspect <image>
+  docker image inspect <image>
     Show detailed image metadata (JSON)
 
   docker history <image>
@@ -131,6 +146,9 @@ commands_info = """
 
   docker volume prune
     Remove all unused volumes
+
+  docker system df -v
+    Show verbose disk usage per volume
 
 ── NETWORKS ─────────────────────────────────────────
 

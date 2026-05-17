@@ -64,59 +64,37 @@ from src.ui.keyboard_navigation import (
 )
 
 # Import Docker action modules
-from src.docker.docker_actions import (
-    update_docker_status,
-    start_docker_service,
-    stop_docker_service,
-    restart_docker_service,
-    clean_all_resources,
-    start_all_containers,
-    stop_all_containers,
-    restart_all_containers,
-    delete_all_containers,
-    delete_all_images,
-    prune_images,
-    prune_volumes,
-    prune_networks,
-    delete_used_volumes,
-    delete_all_volumes
+from src.docker.actions import (
+    update_docker_status, start_docker_service, stop_docker_service,
+    restart_docker_service, clean_all_resources,
 )
-from src.docker.docker_tables import (
-    show_running_containers,
-    show_all_containers,
-    show_stopped_containers,
-    show_paused_containers,
-    show_containers_with_stats,
-    show_images,
-    show_unused_images,
-    show_used_images,
-    show_volumes,
-    show_used_volumes,
-    show_unused_volumes,
-    show_docker_disk_storage_simple,
-    show_networks,
-    show_compose_projects
+from src.containers.actions import (
+    start_all_containers, stop_all_containers, restart_all_containers, delete_all_containers,
 )
-
-# Import dialogs and specific features
-from src.docker.docker_gui_features import (
-    pull_image_dialog,
-    push_image_dialog,
-    search_hub_dialog,
-    build_image_dialog,
-    reopen_latest_build_status_window,
-    reopen_latest_pull_status_window,
-    load_image_dialog,
-    create_volume_dialog,
-    create_network_dialog,
-    compose_up_from_file_dialog,
-    open_container_terminal_dialog,
-    view_container_logs_dialog,
-    docker_disk_usage_view,
-    setup_table_context_menu,
-    setup_text_context_menu,
-    create_selected_item_actions
+from src.containers.tables import (
+    show_running_containers, show_all_containers, show_stopped_containers, show_paused_containers,
 )
+from src.containers.dialogs import (
+    open_container_terminal_dialog, view_container_logs_dialog,
+)
+from src.images.actions import delete_all_images, prune_images
+from src.images.tables import show_images, show_unused_images, show_used_images
+from src.images.dialogs import (
+    pull_image_dialog, push_image_dialog, search_hub_dialog, build_image_dialog,
+    reopen_latest_build_status_window, reopen_latest_pull_status_window, load_image_dialog,
+)
+from src.volumes.actions import prune_volumes, delete_used_volumes, delete_all_volumes
+from src.volumes.tables import show_volumes, show_used_volumes, show_unused_volumes
+from src.volumes.dialogs import create_volume_dialog
+from src.networks.actions import prune_networks
+from src.networks.tables import show_networks
+from src.networks.dialogs import create_network_dialog
+from src.compose.tables import show_compose_projects
+from src.compose.dialogs import compose_up_from_file_dialog
+from src.stats.tables import show_containers_with_stats, show_docker_disk_storage_simple
+from src.stats.dialogs import docker_disk_usage_view
+from src.shared.context_menus import setup_table_context_menu, setup_text_context_menu
+from src.shared.item_actions import create_selected_item_actions
 
 
 class DockerGUI:
@@ -135,12 +113,13 @@ class DockerGUI:
         self.root.update_idletasks()
         screen_width = self.root.winfo_screenwidth()
         screen_height = self.root.winfo_screenheight()
-        
+        self.screen_width = screen_width
+
         window_width = min(int(screen_width * 0.85), 1920)
         window_height = min(int(screen_height * 0.75), 1080)
-        min_width = min(int(screen_width * 0.5), 800)
+        min_width = int(screen_width * 0.6)
         min_height = min(int(screen_height * 0.4), 600)
-        
+
         self.root.geometry(f"{window_width}x{window_height}")
         self.root.minsize(min_width, min_height)
         
@@ -573,7 +552,8 @@ class DockerGUI:
         """Create help panel with tabs"""
         theme = themes[self.current_theme]
         link_color = theme.get("link_fg", theme["text_fg"])
-        help_panel = ttk.Frame(parent, width=300)
+        help_panel_width = int(self.screen_width * 0.4)
+        help_panel = ttk.Frame(parent, width=help_panel_width)
         help_panel.pack_propagate(False)
         
         help_notebook = ttk.Notebook(help_panel)
@@ -586,30 +566,53 @@ class DockerGUI:
         creator_content = tk.Frame(
             creator_tab,
             bg=theme["text_bg"],
-            padx=14,
-            pady=12
+            padx=18,
+            pady=16,
         )
         creator_content.pack(fill=tk.BOTH, expand=True)
 
-        creator_title = tk.Label(
+        # App banner
+        app_banner = tk.Label(
             creator_content,
-            text="ABOUT THE CREATOR",
-            font=("Arial", 11, "bold"),
+            text="🐳  Docker Control Panel",
+            font=("Arial", 13, "bold"),
             bg=theme["text_bg"],
             fg=theme["text_fg"],
             anchor="w",
-            justify=tk.LEFT
         )
-        creator_title.pack(fill=tk.X, pady=(0, 12))
+        app_banner.pack(fill=tk.X)
+
+        app_desc = tk.Label(
+            creator_content,
+            text="A graphical Docker manager for Linux",
+            font=("Arial", 9),
+            bg=theme["text_bg"],
+            fg=theme["text_fg"],
+            anchor="w",
+        )
+        app_desc.pack(fill=tk.X, pady=(0, 16))
+
+        # Divider
+        tk.Frame(creator_content, bg=theme.get("tree_border", "#444"), height=1).pack(fill=tk.X, pady=(0, 14))
+
+        # Creator heading
+        creator_title = tk.Label(
+            creator_content,
+            text="ABOUT THE CREATOR",
+            font=("Arial", 9, "bold"),
+            bg=theme["text_bg"],
+            fg=theme["text_fg"],
+            anchor="w",
+        )
+        creator_title.pack(fill=tk.X, pady=(0, 8))
 
         creator_name = tk.Label(
             creator_content,
             text=CREATOR_NAME,
-            font=("Arial", 11, "bold"),
+            font=("Arial", 12, "bold"),
             bg=theme["text_bg"],
             fg=theme["text_fg"],
             anchor="w",
-            justify=tk.LEFT
         )
         creator_name.pack(fill=tk.X)
 
@@ -620,82 +623,82 @@ class DockerGUI:
             bg=theme["text_bg"],
             fg=theme["text_fg"],
             anchor="w",
-            justify=tk.LEFT
         )
-        creator_role.pack(fill=tk.X, pady=(0, 12))
+        creator_role.pack(fill=tk.X, pady=(2, 16))
+
+        # Divider
+        tk.Frame(creator_content, bg=theme.get("tree_border", "#444"), height=1).pack(fill=tk.X, pady=(0, 14))
+
+        # Links heading
+        links_heading = tk.Label(
+            creator_content,
+            text="LINKS",
+            font=("Arial", 9, "bold"),
+            bg=theme["text_bg"],
+            fg=theme["text_fg"],
+            anchor="w",
+        )
+        links_heading.pack(fill=tk.X, pady=(0, 6))
 
         portfolio_label = tk.Label(
             creator_content,
-            text="Portfolio",
+            text="🌐  Portfolio",
             font=("Arial", 10, "bold"),
             bg=theme["text_bg"],
             fg=theme["text_fg"],
             anchor="w",
-            justify=tk.LEFT
         )
         portfolio_label.pack(fill=tk.X)
 
         portfolio_link = tk.Label(
             creator_content,
-            text=CREATOR_PORTFOLIO_LABEL,
+            text="  " + CREATOR_PORTFOLIO_LABEL,
             font=("JetBrains Mono", 9, "underline"),
             bg=theme["text_bg"],
             fg=link_color,
             anchor="w",
-            justify=tk.LEFT,
-            cursor="hand2"
+            cursor="hand2",
         )
-        portfolio_link.pack(fill=tk.X, pady=(0, 12))
-        portfolio_link.bind(
-            "<Button-1>",
-            lambda _event: self.open_external_link(CREATOR_PORTFOLIO_URL)
-        )
+        portfolio_link.pack(fill=tk.X, pady=(2, 12))
+        portfolio_link.bind("<Button-1>", lambda _: self.open_external_link(CREATOR_PORTFOLIO_URL))
 
         github_label = tk.Label(
             creator_content,
-            text="GitHub",
+            text="🐙  GitHub",
             font=("Arial", 10, "bold"),
             bg=theme["text_bg"],
             fg=theme["text_fg"],
             anchor="w",
-            justify=tk.LEFT
         )
         github_label.pack(fill=tk.X)
 
         github_link = tk.Label(
             creator_content,
-            text=CREATOR_GITHUB_LABEL,
+            text="  " + CREATOR_GITHUB_LABEL,
             font=("JetBrains Mono", 9, "underline"),
             bg=theme["text_bg"],
             fg=link_color,
             anchor="w",
-            justify=tk.LEFT,
-            cursor="hand2"
+            cursor="hand2",
         )
-        github_link.pack(fill=tk.X)
-        github_link.bind(
-            "<Button-1>",
-            lambda _event: self.open_external_link(CREATOR_GITHUB_URL)
-        )
+        github_link.pack(fill=tk.X, pady=(2, 0))
+        github_link.bind("<Button-1>", lambda _: self.open_external_link(CREATOR_GITHUB_URL))
 
         creator_note = tk.Label(
             creator_content,
             text="Click a link to open it in your browser.",
-            font=("Arial", 9),
+            font=("Arial", 8),
             bg=theme["text_bg"],
             fg=theme["text_fg"],
             anchor="w",
-            justify=tk.LEFT
         )
-        creator_note.pack(fill=tk.X, pady=(12, 0))
+        creator_note.pack(fill=tk.X, pady=(14, 0))
 
         self._creator_frame = creator_content
         self._creator_text_labels = [
-            creator_title,
-            creator_name,
-            creator_role,
-            portfolio_label,
-            github_label,
+            app_banner, app_desc,
+            creator_title, creator_name, creator_role,
+            links_heading, portfolio_label, github_label,
             creator_note,
         ]
         self._creator_link_labels = [portfolio_link, github_link]

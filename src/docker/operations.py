@@ -80,7 +80,7 @@ def cancel_stream(controller):
     return True
 
 
-def show_table_command(cmd, columns, sudo=False, sudo_password=None, table_callback=None, 
+def show_table_command(cmd, columns, sudo=False, sudo_password=None, table_callback=None,
                       loading_callback=None, table_type=None, table_title=None, append=False):
     """Run docker command and show output in table"""
     def callback(result):
