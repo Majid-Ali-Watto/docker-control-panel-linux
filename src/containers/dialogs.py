@@ -2,6 +2,7 @@
 Container dialogs: file browser, terminal, logs.
 """
 
+from src.ui.rounded import readable_color
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
 import threading
@@ -86,7 +87,7 @@ def browse_container_files_dialog(root, display_manager):
     btn_upload.pack(side=tk.LEFT)
     status_var = tk.StringVar(value="Loading…")
     ttk.Label(footer, textvariable=status_var, font=("Arial", 9),
-              foreground="gray").pack(side=tk.LEFT, padx=10)
+              foreground=readable_color("gray")).pack(side=tk.LEFT, padx=10)
     ttk.Button(footer, text="Close", width=9, command=dialog.destroy).pack(side=tk.RIGHT)
 
     # State
@@ -414,10 +415,10 @@ def open_container_terminal_dialog(root, display_manager):
             error_frame.pack(pady=5, padx=20, fill=tk.X)
             ttk.Label(error_frame, text="Error:", font=("Arial", 9, "bold")).pack(anchor='w')
             ttk.Label(error_frame, text=last_error,
-                     font=("Arial", 8), foreground="red", wraplength=600).pack(anchor='w')
+                     font=("Arial", 8), foreground=readable_color("red"), wraplength=600).pack(anchor='w')
 
             ttk.Label(error_frame, text="\n💡 Install a terminal emulator:",
-                     font=("Arial", 9, "bold"), foreground="blue").pack(anchor='w', pady=(10, 0))
+                     font=("Arial", 9, "bold"), foreground=readable_color("blue")).pack(anchor='w', pady=(10, 0))
             install_cmd = "sudo apt install tilix  # or xfce4-terminal, gnome-terminal"
             install_text = tk.Text(error_frame, height=1, font=("Courier New", 9), wrap=tk.NONE,
                                   bg="#f0f0f0", relief=tk.FLAT)
@@ -616,7 +617,7 @@ def view_container_logs_dialog(root, display_manager):
         schedule_search_refresh()
 
         if status_text is not None:
-            status_label.config(text=status_text, foreground=status_color or "green")
+            status_label.config(text=status_text, foreground=readable_color(status_color or "green"))
 
     def append_log_line(line):
         logs_text.config(state=tk.NORMAL)
@@ -633,7 +634,7 @@ def view_container_logs_dialog(root, display_manager):
 
         timestamps_flag = "--timestamps" if timestamps_var.get() else ""
 
-        status_label.config(text="⏳ Fetching logs...", foreground="orange")
+        status_label.config(text="⏳ Fetching logs...", foreground=readable_color("orange"))
         logs_text.config(state=tk.NORMAL)
         logs_text.delete(1.0, tk.END)
         logs_text.config(state=tk.DISABLED)
@@ -662,7 +663,7 @@ def view_container_logs_dialog(root, display_manager):
         follow_var.set(True)
         follow_check.config(state=tk.DISABLED)
         refresh_btn.config(state=tk.DISABLED)
-        status_label.config(text="📡 Following logs (live)...", foreground="blue")
+        status_label.config(text="📡 Following logs (live)...", foreground=readable_color("blue"))
 
         timestamps_flag = "--timestamps" if timestamps_var.get() else ""
 
@@ -692,7 +693,7 @@ def view_container_logs_dialog(root, display_manager):
                 pass
 
             process.kill()
-            logs_window.after(0, lambda: status_label.config(text="✓ Stopped following logs", foreground="gray"))
+            logs_window.after(0, lambda: status_label.config(text="✓ Stopped following logs", foreground=readable_color("gray")))
 
         follow_thread['thread'] = threading.Thread(target=follow_task, daemon=True)
         follow_thread['thread'].start()
@@ -703,7 +704,7 @@ def view_container_logs_dialog(root, display_manager):
             follow_var.set(False)
             follow_check.config(state=tk.NORMAL)
             refresh_btn.config(state=tk.NORMAL)
-            status_label.config(text="✓ Stopped following logs", foreground="gray")
+            status_label.config(text="✓ Stopped following logs", foreground=readable_color("gray"))
 
     def toggle_follow():
         if follow_var.get():
@@ -716,7 +717,7 @@ def view_container_logs_dialog(root, display_manager):
         logs_text.delete(1.0, tk.END)
         logs_text.config(state=tk.DISABLED)
         schedule_search_refresh()
-        status_label.config(text="Logs cleared", foreground="gray")
+        status_label.config(text="Logs cleared", foreground=readable_color("gray"))
 
     def clear_search():
         search_var.set("")
@@ -733,7 +734,7 @@ def view_container_logs_dialog(root, display_manager):
             try:
                 with open(filename, 'w') as f:
                     f.write(logs_text.get(1.0, tk.END))
-                status_label.config(text=f"✓ Logs saved to {filename}", foreground="green")
+                status_label.config(text=f"✓ Logs saved to {filename}", foreground=readable_color("green"))
             except Exception as e:
                 messagebox.showerror("Save Failed", f"Failed to save logs: {str(e)}", parent=logs_window)
 

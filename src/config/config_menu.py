@@ -3,6 +3,18 @@ Menu structure configuration for Docker GUI
 Note: Function references will be resolved at import time in the main application
 """
 
+# Buttons that switch which list is shown (they stay highlighted and can be reloaded in
+# place). Every other button runs an action or opens a dialog.
+VIEW_BUTTONS = {
+    "Containers": {"All", "Running", "Stopped", "Paused"},
+    "Images": {"All", "Used", "Unused"},
+    "Volumes": {"Volumes", "Used", "Unused"},
+    "Networks": {"All Networks"},
+    "Compose": {"Projects"},
+    "Stats": {"Container Stats", "Docker Disk Usage", "Disk Storage Simple"},
+}
+
+
 def get_menu_structure(
     start_docker, stop_docker, restart_docker, clean_all,
     show_all_containers, show_running_containers, show_stopped_containers, show_paused_containers,

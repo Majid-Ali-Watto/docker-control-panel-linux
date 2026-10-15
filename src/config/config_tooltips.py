@@ -59,7 +59,7 @@ CATEGORY_TOOLTIPS = {
     },
     "Compose": {
         "Projects": "Show Docker Compose projects detected by Docker",
-        "Up From File": "Choose a compose file and start the project in detached mode",
+        "Up From File": "Choose compose file(s) or a project folder and start the project in detached mode; it stays listed under Projects",
     },
     "Stats": {
         "Container Stats": "Real-time CPU, memory, and network I/O\nfor all running containers",
@@ -102,7 +102,12 @@ ACTION_TOOLTIPS = {
     "connect_network": "Attach a container to the selected network",
     "disconnect_network": "Detach a container from the selected network",
     "compose_up": "Start or recreate services for the selected compose project",
+    "compose_up_build": "Rebuild images from their Dockerfiles, then start or recreate the selected compose project",
+    "compose_build": "Build (or rebuild) the images of the selected compose project without starting it",
+    "compose_pull": "Pull the latest images for the selected compose project",
+    "compose_stop": "Stop the selected compose project's containers without removing them",
     "compose_down": "Stop and remove resources for the selected compose project",
+    "compose_down_volumes": "Stop and remove the selected compose project AND its volumes (data is deleted)",
     "compose_restart": "Restart services for the selected compose project",
     "compose_logs": "Show recent logs for the selected compose project",
     "compose_services": "List services/containers for the selected compose project",

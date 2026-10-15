@@ -42,10 +42,10 @@ src/
 │   ├── dialogs.py             # Create network dialog
 │   └── tables.py              # show_networks
 ├── compose/
-│   ├── dialogs.py             # Compose up-from-file dialog
-│   └── tables.py              # show_compose_projects
+│   ├── dialogs.py             # Compose up dialog: pick file(s) or a project folder; remembers them
+│   └── tables.py              # show_compose_projects (also lists remembered projects as "not running")
 ├── stats/
-│   ├── dialogs.py             # Disk usage detail view
+│   ├── dialogs.py             # Disk usage view: Images/Containers/Volumes/Build Cache tabs, each a DisplayManager table
 │   └── tables.py              # show_containers_with_stats, show_docker_disk_storage_simple
 ├── shared/
 │   ├── context_menus.py       # Right-click menus for table and text output widgets
@@ -55,6 +55,12 @@ src/
 ├── ui/
 │   ├── ui_components.py       # Reusable dialogs (password prompt, install prompt, Tooltip)
 │   ├── ui_display.py          # DisplayManager — switches between table/text views
+│   ├── rounded.py             # Rounded corners: ttk style images + RoundedPanel/RoundedBadge
+│   ├── datetime_picker.py     # Calendar + time picker dialog (custom date range From/To)
+│   ├── filter_popup.py        # Dropdown under the toolbar's Filters button (Created range, Apply / Clear filters)
+│   ├── cell_format.py         # format_cell: display-only tidying (dates, sizes, ports, compose files)
+│   ├── popup_menu.py          # PopupMenu: padded, bordered, rounded popup used by the table's right-click menu
+│   ├── table_cells.py         # CellSelection: active table cell (outline + raw value for copying)
 │   ├── terminal_panel.py      # Embedded terminal panel
 │   └── keyboard_navigation.py # Keyboard shortcuts and focus management
 ├── help/
@@ -74,9 +80,16 @@ Entry point: `docker_gui_modular.py` — `DockerGUI` class wires everything toge
 - **No top header bar** — the window is split directly into sidebar (left) + main content (right). The sidebar shows the app title and Docker service status at the top.
 - **Docker info panel** — a dark banner shown below the action toolbar when the Docker category is active (`DockerGUI._create_docker_info_panel`). Hidden for all other categories.
 - **DisplayManager** (`src/ui/ui_display.py`): single object that owns the output area; call `show_table(columns, rows)` or `show_text_output(text)` — never manipulate output widgets directly.
+- **Reloadable lists**: `VIEW_BUTTONS` in `config_menu.py` lists the toolbar buttons that switch the visible list. The last one clicked is remembered in `DisplayManager.view_refresh` so row actions can reload the list in place. Add new list buttons there (the toolbar layout itself is a single row of buttons).
+- **Table header / filters**: `DisplayManager._build_header` builds the title + count badge, then one toolbar (search, sort dropdown + Asc/Desc, and a "☰ Filters" button) with identically sized controls. The button opens `filter_popup.FilterPopup` under it: "Created" preset, From/To fields (typed `YYYY-MM-DD[ HH:MM]` or the `datetime_picker.py` calendar via "Pick…", shown only for "Custom range"), and Apply / Clear filters; edits only take effect on Apply, and Clear filters also empties the search box. The button is highlighted while any filter is active and only exists for tables with a date column. A column named `CREATED` (docker `{{.CreatedAt}}`, last column — keep row indexes used by `item_actions.py` stable) enables the date filter; Volumes and Compose have none (search only; Esc clears it). Columns are sized from measured text widths.
+- **Table cells**: cells are shown through `cell_format.format_cell(column, text)` (readable dates, `388 MB`, de-duplicated ports, `~/` compose paths) and empty ones as `DisplayManager.EMPTY_CELL` ("—"), but `_rows`/`_shown` keep docker's original text: `get_item_values()` (used by `item_actions.py`), sorting and the date filter use it, while search matches either form and copy uses `get_item_texts()` (what is shown, blanks as ''). Add new display tidying to `format_cell`, keyed by column name — never read row data back from the Treeview. `table_cells.CellSelection` tracks the clicked cell (outlined while its row is selected, follows its row across reloads/sorts). `setup_table_context_menu(display_manager, root)` binds right-click (selects the cell/row under the pointer, then opens a `popup_menu.PopupMenu`: copy cell / copy rows / select all rows / the toolbar's row actions / Close menu) plus Ctrl+C (cell, else rows) and Ctrl+A (select all). `PopupMenu` replaces `tk.Menu` because a native menu cannot have padding, a border or rounded corners; it is a `RoundedPanel` placed over the window (corner pixels show the clicked row's colour), entries run only on a left click (wheel / other buttons are ignored), arrows + Enter work, and an outside click or Esc closes it. Double-click runs the details action in `_DOUBLE_CLICK_ACTION`.
+- **Row actions**: in `item_actions.py`, state-changing actions use `_run_mutation` (table stays, status bar reports the result, list reloads in place; errors show the output with a "← Back to list" button). Read-only actions (inspect/logs/history) use `_run_output_command`. Buttons are enabled/disabled by selection via `DisplayManager.update_selection_state()` — register new single-row-only actions in `_SINGLE_ROW_ACTIONS` and new buttons in `_ACTION_LAYOUT`.
+- **Rounded corners**: Tk has no border-radius. `src/ui/rounded.py` swaps the border element of ttk buttons/entries/comboboxes/label frames for nine-slice images (`apply_rounded_styles`, re-run on every theme change) and provides `RoundedPanel`/`RoundedBadge` (Canvas) for tk surfaces. Create coloured tk widgets with `rounded.make(...)` — ttkbootstrap discards `bg`/`fg` passed to constructors and resets them on theme change; `make` re-applies them. Button/label text is made legible per theme in this module (`readable`, `on_fill`, `readable_color` — WCAG 4.5:1, 3:1 for disabled); use `readable_color(...)` instead of fixed colour names like `"green"`/`"gray"` on theme surfaces. Keep `_TILE` large: Tk tiles the image centre, and a small centre makes wide widgets take seconds to repaint.
 - **Menu wiring**: all sidebar buttons and their lambdas are defined in `src/config/config_menu.py` via `get_menu_structure()`. Add new actions there.
 - **Docker commands**: raw CLI strings live in `src/docker/commands.py`; execution goes through `src/docker/operations.py`. Do not inline subprocess calls elsewhere.
 - **Threading**: long-running docker commands must use the helpers in `threads.py` to avoid blocking the Tkinter main loop.
+- **Tabbed tables**: `DisplayManager.show_table(..., tabs={label: callback}, active_tab=label)` draws a tab strip above the title; the Docker Disk Usage view uses it (one `disk_*` table type per tab, so search, sort, count badge and row actions come for free). Row actions accept those types through `_CONTAINER_VIEWS` / `_IMAGE_VIEWS` / `_VOLUME_VIEWS` in `item_actions.py` — only valid because the tab rows start with the same identifying columns. Relative ages (`2 weeks ago`) sort by age.
+- **Compose projects**: files picked in "Up From File" are saved to `compose_projects` in `~/.docker-gui/config.json` so a project stays listed (and can be started again) after `compose down`; entries whose files no longer exist are hidden.
 - **Password**: stored once in `~/.docker-gui/config.json` (0600). Read via `config_manager.py` — never prompt inline.
 - **Terminal launch**: uses `clean_subprocess_env()` from `utils.py` to strip snap-injected env vars before calling `subprocess.Popen`, preventing libpthread conflicts.
 - **Streaming sessions**: long-running streaming commands (build, pull) use `_start_stream_session` / `_show_stream_session_window` in `src/shared/stream.py` so the user can close the window and reopen the status later via a dedicated sidebar button.

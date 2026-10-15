@@ -46,13 +46,17 @@ def _center_dialog(dialog, min_width=420):
     dialog.geometry(f"{width}x{height}+{x}+{y}")
 
 
+def is_error_output(text):
+    """True when docker/sudo output looks like a failure."""
+    text = str(text).lower()
+    return any(hint in text for hint in _ERROR_HINTS)
+
+
 def _make_output_callback(show_text_output_callback, title="", refresh_callback=None, root=None):
     def callback(result):
         text = f"{title}\n\n{result}".strip() if title else result
         show_text_output_callback(text)
         if refresh_callback and root:
-            result_lower = result.lower()
-            has_error = any(hint in result_lower for hint in _ERROR_HINTS)
-            if not has_error:
+            if not is_error_output(result):
                 root.after(800, refresh_callback)
     return callback

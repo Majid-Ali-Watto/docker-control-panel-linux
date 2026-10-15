@@ -76,6 +76,20 @@ def save_selected_theme(theme_name):
     _save_config(config)
 
 
+def load_compose_projects():
+    """Compose file lists the user has started from the app (one list of paths each), oldest first."""
+    projects = _load_config().get('compose_projects', [])
+    return [files for files in projects
+            if isinstance(files, list) and files and all(isinstance(f, str) for f in files)]
+
+
+def save_compose_project(files):
+    """Remember a compose project's files so it stays listed after `compose down`."""
+    config = _load_config()
+    config['compose_projects'] = [p for p in load_compose_projects() if p != files] + [list(files)]
+    _save_config(config)
+
+
 def get_sudo_password():
     """Get current sudo password"""
     global SUDO_PASSWORD

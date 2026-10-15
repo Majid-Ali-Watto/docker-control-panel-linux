@@ -13,7 +13,7 @@ def show_networks(show_table_callback, show_loading_callback):
     if not check_docker_running(): return
     show_table_command(
         DOCKER_NETWORK_LS,
-        ["NETWORK ID", "NAME", "DRIVER", "SCOPE"],
+        ["NETWORK ID", "NAME", "DRIVER", "SCOPE", "CREATED"],
         sudo=True, sudo_password=get_sudo_password(),
         table_callback=show_table_callback,
         loading_callback=show_loading_callback,
