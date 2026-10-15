@@ -160,6 +160,17 @@ def _display_template(name, template):
     return text.replace("\x00", "{{").replace("\x01", "}}").replace("\t", "\\t")
 
 
+def _display_variants(name, template, description):
+    """[(command, description)] for one constant. Compose templates take `{files}`: they are listed
+    first as typed inside the project folder (no -f needed) and then with an explicit compose file."""
+    shown = _display_template(name, template)
+    if "{files}" not in template:
+        return [(shown, description)]
+    in_folder = _display_template(name, template.replace(" {files}", ""))
+    return [(in_folder, f"{description} — run in the project folder"),
+            (shown, f"{description} — with a compose file")]
+
+
 def _app_constant_groups():
     """[(group title, [constant names])] in the order commands.py declares them."""
     groups, current = [], None
@@ -180,8 +191,7 @@ def _build_app_sections():
     for title, names in _app_constant_groups():
         items = sections.setdefault(title, [])
         for name in names:
-            items.append((_display_template(name, getattr(_commands, name)),
-                          _DESCRIPTIONS.get(name, "")))
+            items.extend(_display_variants(name, getattr(_commands, name), _DESCRIPTIONS.get(name, "")))
     for title, items in _EXTRA_APP_COMMANDS.items():
         sections.setdefault(title, []).extend(items)
     return [(title.upper(), items) for title, items in sections.items()]
@@ -292,20 +302,58 @@ COMMAND_SECTIONS = [
         ("docker network prune -f", "Remove all unused networks"),
     ]),
     ("COMPOSE", [
-        ("docker compose ls", "List active Compose projects"),
-        ("docker compose -f <file.yml> up -d", "Start services in detached mode"),
-        ("docker compose -f <file.yml> up -d --build", "Rebuild images then start services"),
-        ("docker compose -f <file.yml> build", "Build or rebuild service images"),
-        ("docker compose -f <file.yml> pull", "Pull service images"),
-        ("docker compose -f <file.yml> stop", "Stop services without removing them"),
-        ("docker compose -f <file.yml> down", "Stop and remove containers + networks"),
-        ("docker compose -f <file.yml> down -v", "Also remove named volumes"),
-        ("docker compose -f <file.yml> restart", "Restart all services"),
-        ("docker compose -f <file.yml> logs --tail 200", "View the last 200 log lines of all services"),
-        ("docker compose -f <file.yml> logs -f <service>", "Follow logs for a specific service"),
-        ("docker compose -f <file.yml> ps --all", "Show status of Compose services"),
-        ("docker compose -f <file.yml> exec <service> sh", "Open a shell in a running service"),
-        ("docker compose -f <file.yml> config", "Show the final merged Compose config"),
+        # Inside the project folder (the folder with docker-compose.yml / compose.yaml) no -f is needed
+        ("docker compose ls", "List running Compose projects"),
+        ("docker compose ls -a", "List all Compose projects, including stopped ones"),
+        ("docker compose up", "Create and start services, showing their logs (Ctrl+C stops them)"),
+        ("docker compose up -d", "Create and start services in the background"),
+        ("docker compose up --build", "Rebuild images, then start services (foreground)"),
+        ("docker compose up -d --build", "Rebuild images, then start services in the background"),
+        ("docker compose up -d --force-recreate", "Recreate containers even if nothing changed"),
+        ("docker compose up -d --remove-orphans", "Also remove containers of services no longer in the file"),
+        ("docker compose up -d <service>", "Start only one service (and what it depends on)"),
+        ("docker compose up -d --no-deps <service>", "Start one service without its dependencies"),
+        ("docker compose up -d --scale <service>=<n>", "Run n copies of a service"),
+        ("docker compose build", "Build or rebuild service images"),
+        ("docker compose build --no-cache", "Build without using the layer cache"),
+        ("docker compose build <service>", "Build the image of one service"),
+        ("docker compose pull", "Pull service images"),
+        ("docker compose create", "Create containers without starting them"),
+        ("docker compose start", "Start existing stopped services"),
+        ("docker compose stop", "Stop services without removing them"),
+        ("docker compose restart", "Restart all services"),
+        ("docker compose restart <service>", "Restart one service"),
+        ("docker compose pause", "Pause all services"),
+        ("docker compose unpause", "Resume paused services"),
+        ("docker compose kill", "Force-stop services (SIGKILL)"),
+        ("docker compose down", "Stop and remove containers and networks"),
+        ("docker compose down -v", "Also remove named volumes"),
+        ("docker compose down --rmi all", "Also remove the images used by services"),
+        ("docker compose down --remove-orphans", "Also remove containers of services not in the file"),
+        ("docker compose rm -f", "Remove stopped service containers"),
+        ("docker compose ps", "List the project's running containers"),
+        ("docker compose ps -a", "List all of the project's containers, including stopped ones"),
+        ("docker compose top", "Show running processes of each service"),
+        ("docker compose images", "List the images used by the project"),
+        ("docker compose logs", "View logs of all services"),
+        ("docker compose logs -f", "Follow logs of all services live"),
+        ("docker compose logs --tail 100", "View the last 100 log lines of all services"),
+        ("docker compose logs -f <service>", "Follow logs of one service"),
+        ("docker compose exec <service> sh", "Open a shell in a running service"),
+        ("docker compose exec <service> <command>", "Run a command in a running service"),
+        ("docker compose run --rm <service> <command>", "Run a one-off command in a new throw-away container"),
+        ("docker compose cp <service>:<src> <dest>", "Copy files from a service container to the host"),
+        ("docker compose config", "Show the final merged configuration"),
+        ("docker compose config --services", "List the service names"),
+        ("docker compose version", "Show the Compose version"),
+        # Pointing Compose at a file, project name, env file or profile
+        ("docker compose -f <file.yml> up -d", "Start services from a specific compose file"),
+        ("docker compose -f <file.yml> down", "Stop and remove a project started from a specific file"),
+        ("docker compose -f <a.yml> -f <b.yml> up -d", "Merge several compose files (later files override)"),
+        ("docker compose -p <project> up -d", "Start under a custom project name"),
+        ("docker compose -p <project> down", "Stop and remove a project by its name"),
+        ("docker compose --env-file <file.env> up -d", "Use a specific .env file for variables"),
+        ("docker compose --profile <name> up -d", "Also start services in a profile"),
     ]),
     ("SYSTEM", [
         ("docker system df", "Show disk usage by images, containers, volumes"),
