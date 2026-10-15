@@ -112,6 +112,8 @@ Entry point: `docker_gui_modular.py` — `DockerGUI` class wires everything toge
 
 ## Common Tasks
 
+**Check the Commands tab data**: every command in `help_commands.py` was validated against the installed docker CLI's `--help` (subcommand path + every flag). After editing it, re-check with `docker <subcommand> --help` for new flags; placeholders (`<x>`), `$(...)` and pipes are only checked up to the first docker invocation.
+
 **Add a new Docker action button:**
 1. Add the command string to `src/docker/commands.py`.
 2. Implement the function in the appropriate feature module (e.g. `src/containers/actions.py`).
