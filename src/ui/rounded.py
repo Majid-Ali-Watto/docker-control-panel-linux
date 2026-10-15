@@ -241,9 +241,18 @@ def _round_frames(style, root):
     _install(style, root, "TLabelframe", "Labelframe.border", [((), None, edge)], padding=0)
 
 
+def _muted_label(style, surface):
+    """"Muted.TLabel": the theme's text colour faded towards the surface, kept at 4.5:1 or more
+    (ttkbootstrap's own ``secondary.TLabel`` is 1.6:1 on Darkly and Superhero)."""
+    text = _lookup(style, "TLabel", "foreground")
+    if text:
+        style.configure("Muted.TLabel", foreground=readable(_blend(text, surface, 0.35), surface))
+
+
 def apply_rounded_styles(style, root):
     """Round the ttk widgets of the current theme. Call again after every theme change."""
     surface = _lookup(style, "TFrame", "background") or "#222222"
+    _muted_label(style, surface)
     _round_buttons(style, root, surface)
     _round_fields(style, root, surface)
     _round_frames(style, root)

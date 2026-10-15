@@ -42,9 +42,9 @@ def _link_card(parent, icon, label, text, url, open_link):
     card.pack(fill=tk.X, pady=4)
     ttk.Label(card, text=icon, font=("Arial", 18)).grid(row=0, column=0, rowspan=2, padx=(0, 12))
     ttk.Label(card, text=label, font=("Arial", 11, "bold")).grid(row=0, column=1, sticky="w")
-    ttk.Label(card, text=text, font=("JetBrains Mono", 9), style="secondary.TLabel").grid(row=1, column=1, sticky="w")
+    ttk.Label(card, text=text, font=("JetBrains Mono", 9), style="Muted.TLabel").grid(row=1, column=1, sticky="w")
     card.columnconfigure(1, weight=1)
-    copy = ttk.Button(card, text="Copy", width=7, style="secondary.Outline.TButton")
+    copy = ttk.Button(card, text="Copy", width=7, style="secondary.TButton")
     copy.grid(row=0, column=2, rowspan=2, padx=(8, 6))
 
     def copy_url():
@@ -62,13 +62,13 @@ def _about(parent):
     card = ttk.LabelFrame(parent, padding=(14, 12))
     card.pack(fill=tk.X, pady=4)
     ttk.Label(card, text=f"🐳  {APP_NAME}", font=("Arial", 12, "bold")).pack(anchor=tk.W)
-    ttk.Label(card, text=APP_TAGLINE, font=("Arial", 9), style="secondary.TLabel").pack(anchor=tk.W, pady=(2, 10))
-    ttk.Label(card, text="BUILT WITH", font=("Arial", 8, "bold"), style="secondary.TLabel").pack(anchor=tk.W)
+    ttk.Label(card, text=APP_TAGLINE, font=("Arial", 9), style="Muted.TLabel").pack(anchor=tk.W, pady=(2, 10))
+    ttk.Label(card, text="BUILT WITH", font=("Arial", 8, "bold"), style="Muted.TLabel").pack(anchor=tk.W)
     chips = ttk.Frame(card)
     chips.pack(anchor=tk.W, pady=(4, 10))
     for tech in APP_BUILT_WITH.split(" · "):
         RoundedBadge(chips, text=tech, fill="#1a4a6b", fg="#c0d8f0").pack(side=tk.LEFT, padx=(0, 6))
-    ttk.Label(card, text="REQUIRES", font=("Arial", 8, "bold"), style="secondary.TLabel").pack(anchor=tk.W)
+    ttk.Label(card, text="REQUIRES", font=("Arial", 8, "bold"), style="Muted.TLabel").pack(anchor=tk.W)
     ttk.Label(card, text=APP_REQUIRES, font=("Arial", 10)).pack(anchor=tk.W, pady=(2, 0))
 
 
