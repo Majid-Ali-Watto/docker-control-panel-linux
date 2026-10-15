@@ -77,7 +77,7 @@ class LandingPage(ttk.Frame):
         for label, callback in service_actions:
             ttk.Button(frame, text=label, style=_SERVICE_STYLES.get(label, "secondary.TButton"),
                        command=callback, width=11).pack(side=tk.LEFT, padx=(0, 8))
-        ttk.Label(frame, text="Needs sudo — the saved password is used.", style="secondary.TLabel",
+        ttk.Label(frame, text="Needs sudo — the saved password is used.", style="Muted.TLabel",
                   font=("Arial", 8)).pack(side=tk.RIGHT)
 
     def _card(self, parent, category, icon, description):
@@ -88,7 +88,7 @@ class LandingPage(ttk.Frame):
         ttk.Label(head, text=category, font=("Arial", 12, "bold")).pack(side=tk.LEFT, padx=(10, 0))
         desc = ttk.Label(card, text=description, font=("Arial", 9), justify=tk.LEFT, anchor=tk.W)
         desc.pack(fill=tk.X, pady=(8, 8))
-        ttk.Button(card, text="Open  →", style="secondary.Outline.TButton",
+        ttk.Button(card, text="Open  →", style="secondary.TButton",
                    command=lambda: self._open(category)).pack(anchor=tk.W)
         card.description = desc
         for widget in (card, head, desc, *head.winfo_children()):

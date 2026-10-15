@@ -99,7 +99,7 @@ class CommandsTab(ttk.Frame):
         code.grid(row=0, column=0, sticky="ew")
         desc = ttk.Label(row, text=description, font=("Arial", 9), anchor=tk.W, justify=tk.LEFT)
         desc.grid(row=1, column=0, sticky="ew", pady=(1, 0))
-        copy_btn = ttk.Button(row, text="Copy", width=8, style="secondary.Outline.TButton")
+        copy_btn = ttk.Button(row, text="Copy", width=8, style="secondary.TButton")
         copy_btn.grid(row=0, column=1, rowspan=2, padx=(8, 0), sticky="n")
         self.list.wrap(code, 100)
         self.list.wrap(desc, 100)
@@ -138,7 +138,7 @@ class CommandsTab(ttk.Frame):
         if not self._built:
             return
         for label, chip in self._chips.items():
-            chip.configure(style="primary.TButton" if label == self._category else "secondary.Outline.TButton")
+            chip.configure(style="primary.TButton" if label == self._category else "secondary.TButton")
         for header in self._headers.values():
             header.pack_forget()
         self._shown_headers = set()

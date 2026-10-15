@@ -46,7 +46,7 @@ HELP_SECTIONS = [
             ("Networks", "Connect · Disconnect · Inspect · Delete"),
             ("Compose", "Up · Down · Restart · Logs · Services · Config"),
         ]),
-        ("p", "Actions that change things keep the table on screen and report the result in the status bar; errors show the output with a “← Back to list” button."),
+        ("p", "Actions that change things keep the table on screen and report the result in the status bar; errors show the output with a “← Back” button."),
     ]),
     ("▶️", "Running an image", "The Run dialog", [
         ("p", "Select an image and click Run to start a container with:"),

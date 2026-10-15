@@ -61,9 +61,9 @@ class DisplayManager:
         # The popup has no focus-out signal, so any click in the window outside the button dismisses it
         output_container.winfo_toplevel().bind("<Button-1>", self._dismiss_filter_popup, add="+")
 
-        # "Back to list" bar shown above text output when a table view can be restored
+        # "Back" bar shown above text output when a table view can be restored
         self._back_bar = ttk.Frame(output_container)
-        ttk.Button(self._back_bar, text="← Back to list", style="secondary.TButton",
+        ttk.Button(self._back_bar, text="← Back", style="secondary.TButton",
                    command=self.refresh_view).pack(side=tk.LEFT, padx=10, pady=(5, 0))
 
         # Row-action buttons wrap onto extra lines instead of running off-screen
@@ -82,7 +82,7 @@ class DisplayManager:
         """Show a one-line result message under the table (kind: info | success | error)."""
         if not self.status_label or not self.status_label.winfo_exists():
             return
-        style = {"success": "success.TLabel", "error": "danger.TLabel"}.get(kind, "secondary.TLabel")
+        style = {"success": "success.TLabel", "error": "danger.TLabel"}.get(kind, "Muted.TLabel")
         self.status_label.configure(text=text, style=style)
 
     def refresh_view(self):

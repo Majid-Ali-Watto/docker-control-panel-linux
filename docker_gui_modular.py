@@ -178,6 +178,22 @@ class DockerGUI:
         # Auto-select Docker category
         self.select_initial_category()
     
+    def _landing_action(self, callback):
+        """Run a Docker service action from the landing page; its output gets a Back button."""
+        def run():
+            self.display_manager.view_refresh = self._show_landing
+            callback()
+        return run
+
+    def _show_landing(self):
+        dm = self.display_manager
+        dm.view_refresh = None
+        dm.current_table_type = None
+        for widget in dm.output_container.winfo_children():
+            widget.pack_forget()
+        dm.update_action_buttons()
+        self.landing.pack(fill=tk.BOTH, expand=True)
+
     def _maximize(self):
         """Open maximised (title bar kept); the geometry above is the restored size."""
         try:
@@ -457,13 +473,14 @@ class DockerGUI:
         self.btn_frame.pack(fill=tk.X, pady=(0, 6))
 
         # Status bar: result of the last action (packed before the content so it stays visible)
-        self.status_label = ttk.Label(main_frame, text="Ready", style="secondary.TLabel",
+        self.status_label = ttk.Label(main_frame, text="Ready", style="Muted.TLabel",
                                       font=("Arial", 9), anchor=tk.W)
         self.status_label.pack(side=tk.BOTTOM, fill=tk.X, pady=(4, 0))
 
         # Content area with output and help
         content_area = ttk.Frame(main_frame)
         content_area.pack(fill=tk.BOTH, expand=True)
+        self._content_area = content_area
         
         # Help panel (create and pack first on the right side)
         self.help_panel = self.create_help_panel(content_area)
@@ -487,7 +504,7 @@ class DockerGUI:
         # Landing page of the Docker category (packed by show_category_buttons)
         self.landing = LandingPage(
             output_container, self.docker_status_var,
-            self.menu_structure["Docker"],
+            [(label, self._landing_action(callback)) for label, callback in self.menu_structure["Docker"]],
             lambda category: self.make_sidebar_command(category)(),
             available=self.menu_structure.keys(),
         )
@@ -765,9 +782,13 @@ class DockerGUI:
         if category == "Docker":
             self.help_panel.pack(side=tk.RIGHT, fill=tk.Y, padx=(8, 0))
 
-        # The Docker category opens on the landing page until an action shows something else
+        # The Docker category opens on the landing page (which has its own service buttons), so
+        # the toolbar is hidden there; any other category shows it again
         if category == "Docker":
+            self.btn_frame.pack_forget()
             self.landing.pack(fill=tk.BOTH, expand=True)
+        elif not self.btn_frame.winfo_manager():
+            self.btn_frame.pack(fill=tk.X, pady=(0, 6), before=self._content_area)
 
         # Show/hide terminal panel
         self._terminal_panel.pack_forget()
