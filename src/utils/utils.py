@@ -32,6 +32,9 @@ def clean_subprocess_env():
     }
     env = {k: v for k, v in os.environ.items()
            if k not in _DROP and 'SNAP' not in k}
+    # The app opts out of X input methods for itself; child programs should not inherit that
+    if env.get('XMODIFIERS') == '@im=none':
+        del env['XMODIFIERS']
     # Strip snap dirs from PATH
     env['PATH'] = ':'.join(
         p for p in env.get('PATH', '').split(':') if '/snap/' not in p

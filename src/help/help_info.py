@@ -43,13 +43,16 @@ help_info = """
     unused ones.
 
   🧩 Compose
-    View active Compose projects. Start a project
-    from a docker-compose.yml file.
+    View Compose projects. "Up From File" takes one
+    or more compose files or a project folder and
+    remembers it, so the project stays listed (as
+    not running) after `compose down`.
 
   📊 Stats
     Live container resource usage (CPU, memory,
-    network I/O, block I/O). Also view detailed
-    Docker disk usage.
+    network I/O, block I/O). Docker Disk Usage has
+    Images / Containers / Volumes / Build Cache tabs
+    with the same search, sort and row actions.
 
   💻 Terminal
     Built-in terminal panel for quick commands
@@ -78,6 +81,9 @@ help_info = """
   Compose projects:
     Up · Down · Restart · Logs · Services · Config
 
+  Right-click a row, or double-click it, for the
+  same actions and details.
+
 ── PULL & BUILD STATUS ──────────────────────────────
 
   When a pull or build is started, a streaming log
@@ -88,18 +94,28 @@ help_info = """
     Images → Pull Status  (for docker pull)
     Images → Build Status (for docker build)
 
-── SEARCH & FILTER ──────────────────────────────────
+── SEARCH, SORT & FILTER ────────────────────────────
 
-  A search bar appears above every table. Type any
-  keyword to filter rows across all visible columns
-  in real time. Clear the field to restore all rows.
+  Above every table: a search box (matches any
+  column, live), a sort dropdown with Asc/Desc, and
+  a ☰ Filters button for tables with a date column.
 
-── CONTEXT MENU ─────────────────────────────────────
+  Filters → Created: pick a preset or "Custom range"
+  and type From/To as YYYY-MM-DD[ HH:MM] (or use
+  Pick… for a calendar). Changes apply on Apply;
+  Clear filters also empties the search box.
+  Esc clears the search box.
 
-  Right-click any table row or text area for a
-  context menu with copy options:
-  • Copy a specific cell value
-  • Copy the entire row as text
+── CELLS, ROWS & CONTEXT MENU ───────────────────────
+
+  Click a cell to outline it; Ctrl-C copies that
+  cell, or the selected rows when no cell is active.
+  Ctrl-A selects all rows. Double-click a row to open
+  its details.
+
+  Right-click a table for a menu: copy cell, copy
+  rows, select all rows and the toolbar's row
+  actions. Right-click a text area to copy text.
 
 ── CONTAINER TERMINAL ───────────────────────────────
 
@@ -150,7 +166,17 @@ help_info = """
   Enter / Space     Activate focused button
   Ctrl →            Move focus to the main toolbar
   Ctrl ←            Move focus back to the sidebar
-  Ctrl-C            Copy selected text (text areas)
+  Ctrl-C            Copy cell / rows / selected text
+  Ctrl-A            Select all rows in a table
+  Esc               Clear search · close a menu
+
+── COMMANDS TAB ─────────────────────────────────────
+
+  The Commands tab lists the docker commands used
+  by this app and other common ones.
+  • Click a command to copy it
+  • Copy all / Copy selection copy to the clipboard
+  • Download saves the whole reference as a file
 
 ── DISK USAGE VIEW ──────────────────────────────────
 
@@ -167,4 +193,32 @@ help_info = """
   • All docker commands use fixed constant strings
     — user input is never interpolated into shell
     commands, preventing injection attacks.
+
+── PERFORMANCE ──────────────────────────────────────
+
+  The app turns off X input-method support at start
+  (XMODIFIERS=@im=none): with ibus every widget
+  made startup and screen changes take seconds.
+
+"""
+
+# Shown in the output area of the Docker page until an action is run
+docker_landing_info = """
+  DOCKER SERVICE
+
+  Start      Start docker.socket and docker.service
+  Stop       Stop the Docker service and its socket
+  Restart    Restart the Docker service
+  Clean All  Stop and delete every container, image
+             and volume (asks for confirmation)
+
+  The service status is shown at the top of the sidebar.
+
+  GETTING AROUND
+
+  • Pick Containers, Images, Volumes, Networks, Compose
+    or Stats in the sidebar to list and manage them.
+  • Select rows, then use the action buttons below the table.
+  • The Commands tab on the right lists docker commands
+    you can click to copy or download.
 """

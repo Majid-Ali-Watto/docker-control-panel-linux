@@ -64,7 +64,8 @@ src/
 │   ├── terminal_panel.py      # Embedded terminal panel
 │   └── keyboard_navigation.py # Keyboard shortcuts and focus management
 ├── help/
-│   ├── help_commands.py       # Text shown in Commands tab
+│   ├── help_commands.py       # COMMAND_SECTIONS (single source of the command reference) + commands_as_text()
+│   ├── commands_view.py       # Commands tab: click a command to copy, Copy all / Copy selection / Download
 │   ├── help_creator.py        # Creator name, links shown in Creator tab
 │   └── help_info.py           # Text shown in Help tab
 └── utils/
@@ -93,6 +94,9 @@ Entry point: `docker_gui_modular.py` — `DockerGUI` class wires everything toge
 - **Password**: stored once in `~/.docker-gui/config.json` (0600). Read via `config_manager.py` — never prompt inline.
 - **Terminal launch**: uses `clean_subprocess_env()` from `utils.py` to strip snap-injected env vars before calling `subprocess.Popen`, preventing libpthread conflicts.
 - **Streaming sessions**: long-running streaming commands (build, pull) use `_start_stream_session` / `_show_stream_session_window` in `src/shared/stream.py` so the user can close the window and reopen the status later via a dedicated sidebar button.
+
+- **Startup speed (XIM)**: `docker_gui_modular.py` sets `XMODIFIERS=@im=none` before Tk starts. With an XIM server (ibus) Tk's `XCreateIC` costs ~90 ms per call, which made first paint ~11 s and every screen slow; `clean_subprocess_env()` strips it for child processes. Keep that line above the first Tk call.
+- **Window / landing**: the window opens maximised (`_maximize`, `-zoomed`). The Docker page shows `docker_landing_info` (`help_info.py`) in the output area until an action runs.
 
 ## Coding Conventions
 
