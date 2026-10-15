@@ -37,19 +37,7 @@ from src.config.config_tooltips import (
     SIDEBAR_BOTTOM_TOOLTIPS,
 )
 from src.help.commands_view import build_commands_tab
-from src.help.help_creator import (
-    APP_BUILT_WITH,
-    APP_NAME,
-    APP_REQUIRES,
-    APP_TAGLINE,
-    CREATOR_GITHUB_LABEL,
-    CREATOR_GITHUB_URL,
-    CREATOR_NAME,
-    CREATOR_PORTFOLIO_LABEL,
-    CREATOR_PORTFOLIO_URL,
-    CREATOR_ROLE,
-)
-from src.help.help_info import docker_landing_info
+from src.help.creator_view import build_creator_tab
 from src.help.help_view import build_help_tab
 from src.config.config_menu import get_menu_structure, VIEW_BUTTONS
 
@@ -66,6 +54,7 @@ from src.ui.ui_components import (
 
 from src.ui.ui_display import DisplayManager
 from src.ui.terminal_panel import TerminalPanel
+from src.ui.landing_page import LandingPage
 from src.ui.rounded import apply_rounded_styles, RoundedPanel, make, readable
 from src.ui.keyboard_navigation import (
     setup_keyboard_navigation,
@@ -467,9 +456,6 @@ class DockerGUI:
         self.btn_frame = ttk.LabelFrame(main_frame, text="Select a category from the sidebar", padding=(10, 8))
         self.btn_frame.pack(fill=tk.X, pady=(0, 6))
 
-        # Docker info panel (shown only when Docker category is active)
-        self._docker_info_panel = self._create_docker_info_panel(main_frame)
-
         # Status bar: result of the last action (packed before the content so it stays visible)
         self.status_label = ttk.Label(main_frame, text="Ready", style="secondary.TLabel",
                                       font=("Arial", 9), anchor=tk.W)
@@ -498,6 +484,14 @@ class DockerGUI:
         # Terminal panel — lives inside output_container, shown only when Terminal is active
         self._terminal_panel = TerminalPanel(output_container)
 
+        # Landing page of the Docker category (packed by show_category_buttons)
+        self.landing = LandingPage(
+            output_container, self.docker_status_var,
+            self.menu_structure["Docker"],
+            lambda category: self.make_sidebar_command(category)(),
+            available=self.menu_structure.keys(),
+        )
+
         # Setup action buttons
         self.setup_action_buttons(action_frame)
 
@@ -505,73 +499,8 @@ class DockerGUI:
         setup_text_context_menu(text_widget, self.root)
         setup_table_context_menu(self.display_manager, self.root)
     
-    def _create_docker_info_panel(self, parent):
-        """Create app-description banner shown below the toolbar when Docker is active."""
-        BG = "#0d1117"
-        panel = RoundedPanel(parent, BG, radius=12, padding=2)
-        body = panel.body
-
-        # Left column: whale + title + tagline
-        left = make(tk.Frame, body, bg=BG)
-        left.pack(side=tk.LEFT, padx=(14, 24), pady=10)
-
-        make(tk.Label, left, text="🐳  Docker Control Panel",
-             font=("JetBrains Mono", 12, "bold"), bg=BG, fg="#4ea8f7").pack(anchor=tk.W)
-        make(tk.Label, left, text="A graphical Docker manager for Linux",
-             font=("Arial", 9), bg=BG, fg="#6e7f92").pack(anchor=tk.W, pady=(2, 0))
-
-        # Vertical divider
-        make(tk.Frame, body, bg="#1e2d3d", width=1).pack(side=tk.LEFT, fill=tk.Y, pady=6)
-
-        # Centre column: feature chips
-        centre = make(tk.Frame, body, bg=BG)
-        centre.pack(side=tk.LEFT, padx=20, pady=10)
-
-        make(tk.Label, centre, text="Features",
-             font=("Arial", 8, "bold"), bg=BG, fg="#6e7f92").pack(anchor=tk.W)
-
-        chips_row = make(tk.Frame, centre, bg=BG)
-        chips_row.pack(anchor=tk.W, pady=(4, 0))
-
-        _FEATURES = [
-            ("📦 Containers", "#1a4a6b"),
-            ("🖼 Images",      "#1a4a2b"),
-            ("💾 Volumes",     "#4a3a1a"),
-            ("🕸 Networks",    "#3a1a4a"),
-            ("🧩 Compose",     "#1a3a4a"),
-            ("📊 Stats",       "#4a1a1a"),
-        ]
-        for label, chip_bg in _FEATURES:
-            make(tk.Label, chips_row, text=f" {label} ",
-                 font=("Arial", 8, "bold"), bg=chip_bg, fg="#c0d8f0",
-                 relief="flat", padx=4, pady=3).pack(side=tk.LEFT, padx=(0, 6))
-
-        # Vertical divider
-        make(tk.Frame, body, bg="#1e2d3d", width=1).pack(side=tk.LEFT, fill=tk.Y, pady=6)
-
-        # Right column: quick tips
-        right = make(tk.Frame, body, bg=BG)
-        right.pack(side=tk.LEFT, padx=20, pady=10)
-
-        make(tk.Label, right, text="Quick Tips",
-             font=("Arial", 8, "bold"), bg=BG, fg="#6e7f92").pack(anchor=tk.W)
-
-        _TIPS = [
-            "• Click a sidebar category to explore Docker resources",
-            "• Select a row in the table, then use the action buttons below",
-            "• Right-click any table row for a context menu",
-        ]
-        for tip in _TIPS:
-            make(tk.Label, right, text=tip, font=("Arial", 8), bg=BG, fg="#8a9fb5",
-                 anchor=tk.W, justify=tk.LEFT).pack(anchor=tk.W, pady=1)
-
-        # Panel starts hidden; show_category_buttons controls visibility
-        return panel
-
     def create_help_panel(self, parent):
         """Create help panel with tabs"""
-        theme = themes[self.current_theme]
-        link_color = theme.get("link_fg", theme["text_fg"])
         help_panel_width = int(self.screen_width * 0.4)
         help_panel = ttk.Frame(parent, width=help_panel_width)
         help_panel.pack_propagate(False)
@@ -580,170 +509,9 @@ class DockerGUI:
         help_notebook.pack(fill=tk.BOTH, expand=True)
         help_notebook.enable_traversal()
 
-        # Creator tab
-        creator_tab = ttk.Frame(help_notebook)
-        help_notebook.add(creator_tab, text=" Creator ")
-        creator_content = tk.Frame(
-            creator_tab,
-            bg=theme["text_bg"],
-            padx=18,
-            pady=16,
-        )
-        creator_content.pack(fill=tk.BOTH, expand=True)
+        # Creator tab (profile card, link cards, about)
+        build_creator_tab(help_notebook, self.open_external_link)
 
-        # App banner
-        app_banner = tk.Label(
-            creator_content,
-            text=f"🐳  {APP_NAME}",
-            font=("Arial", 13, "bold"),
-            bg=theme["text_bg"],
-            fg=theme["text_fg"],
-            anchor="w",
-        )
-        app_banner.pack(fill=tk.X)
-
-        app_desc = tk.Label(
-            creator_content,
-            text=APP_TAGLINE,
-            font=("Arial", 9),
-            bg=theme["text_bg"],
-            fg=theme["text_fg"],
-            anchor="w",
-        )
-        app_desc.pack(fill=tk.X, pady=(0, 16))
-
-        # Divider
-        tk.Frame(creator_content, bg=theme.get("tree_border", "#444"), height=1).pack(fill=tk.X, pady=(0, 14))
-
-        # Creator heading
-        creator_title = tk.Label(
-            creator_content,
-            text="ABOUT THE CREATOR",
-            font=("Arial", 9, "bold"),
-            bg=theme["text_bg"],
-            fg=theme["text_fg"],
-            anchor="w",
-        )
-        creator_title.pack(fill=tk.X, pady=(0, 8))
-
-        creator_name = tk.Label(
-            creator_content,
-            text=CREATOR_NAME,
-            font=("Arial", 12, "bold"),
-            bg=theme["text_bg"],
-            fg=theme["text_fg"],
-            anchor="w",
-        )
-        creator_name.pack(fill=tk.X)
-
-        creator_role = tk.Label(
-            creator_content,
-            text=CREATOR_ROLE,
-            font=("Arial", 10),
-            bg=theme["text_bg"],
-            fg=theme["text_fg"],
-            anchor="w",
-        )
-        creator_role.pack(fill=tk.X, pady=(2, 16))
-
-        # Divider
-        tk.Frame(creator_content, bg=theme.get("tree_border", "#444"), height=1).pack(fill=tk.X, pady=(0, 14))
-
-        # Links heading
-        links_heading = tk.Label(
-            creator_content,
-            text="LINKS",
-            font=("Arial", 9, "bold"),
-            bg=theme["text_bg"],
-            fg=theme["text_fg"],
-            anchor="w",
-        )
-        links_heading.pack(fill=tk.X, pady=(0, 6))
-
-        portfolio_label = tk.Label(
-            creator_content,
-            text="🌐  Portfolio",
-            font=("Arial", 10, "bold"),
-            bg=theme["text_bg"],
-            fg=theme["text_fg"],
-            anchor="w",
-        )
-        portfolio_label.pack(fill=tk.X)
-
-        portfolio_link = tk.Label(
-            creator_content,
-            text="  " + CREATOR_PORTFOLIO_LABEL,
-            font=("JetBrains Mono", 9, "underline"),
-            bg=theme["text_bg"],
-            fg=link_color,
-            anchor="w",
-            cursor="hand2",
-        )
-        portfolio_link.pack(fill=tk.X, pady=(2, 12))
-        portfolio_link.bind("<Button-1>", lambda _: self.open_external_link(CREATOR_PORTFOLIO_URL))
-
-        github_label = tk.Label(
-            creator_content,
-            text="🐙  GitHub",
-            font=("Arial", 10, "bold"),
-            bg=theme["text_bg"],
-            fg=theme["text_fg"],
-            anchor="w",
-        )
-        github_label.pack(fill=tk.X)
-
-        github_link = tk.Label(
-            creator_content,
-            text="  " + CREATOR_GITHUB_LABEL,
-            font=("JetBrains Mono", 9, "underline"),
-            bg=theme["text_bg"],
-            fg=link_color,
-            anchor="w",
-            cursor="hand2",
-        )
-        github_link.pack(fill=tk.X, pady=(2, 0))
-        github_link.bind("<Button-1>", lambda _: self.open_external_link(CREATOR_GITHUB_URL))
-
-        # Divider
-        tk.Frame(creator_content, bg=theme.get("tree_border", "#444"), height=1).pack(fill=tk.X, pady=(14, 14))
-
-        about_heading = tk.Label(
-            creator_content, text="ABOUT THE APP",
-            font=("Arial", 9, "bold"),
-            bg=theme["text_bg"], fg=theme["text_fg"], anchor="w",
-        )
-        about_heading.pack(fill=tk.X, pady=(0, 6))
-
-        about_lines = [
-            tk.Label(
-                creator_content, text=line, font=("Arial", 9),
-                bg=theme["text_bg"], fg=theme["text_fg"], anchor="w",
-            )
-            for line in (f"Built with  {APP_BUILT_WITH}", f"Requires  {APP_REQUIRES}")
-        ]
-        for label in about_lines:
-            label.pack(fill=tk.X, pady=1)
-
-        creator_note = tk.Label(
-            creator_content,
-            text="Click a link to open it in your browser.",
-            font=("Arial", 8),
-            bg=theme["text_bg"],
-            fg=theme["text_fg"],
-            anchor="w",
-        )
-        creator_note.pack(fill=tk.X, pady=(14, 0))
-
-        self._creator_frame = creator_content
-        self._creator_text_labels = [
-            app_banner, app_desc,
-            creator_title, creator_name, creator_role,
-            links_heading, portfolio_label, github_label,
-            about_heading, *about_lines,
-            creator_note,
-        ]
-        self._creator_link_labels = [portfolio_link, github_link]
-        
         # Commands tab (copyable / downloadable reference)
         build_commands_tab(help_notebook)
 
@@ -889,7 +657,6 @@ class DockerGUI:
 
         self.current_theme = theme_name
         theme = themes[theme_name]
-        link_color = theme.get("link_fg", theme["text_fg"])
         self.theme_var.set(theme_name)
         
         # Switch ttkbootstrap theme (updates all ttk widgets automatically)
@@ -930,17 +697,7 @@ class DockerGUI:
         )
         
         # Commands / Help tabs are built from ttk widgets and follow the theme on their own
-        if hasattr(self, '_creator_frame') and self._creator_frame.winfo_exists():
-            self._creator_frame.configure(bg=theme["text_bg"])
-        if hasattr(self, '_creator_text_labels'):
-            for label in self._creator_text_labels:
-                if label.winfo_exists():
-                    label.configure(bg=theme["text_bg"], fg=theme["text_fg"])
-        if hasattr(self, '_creator_link_labels'):
-            for label in self._creator_link_labels:
-                if label.winfo_exists():
-                    label.configure(bg=theme["text_bg"], fg=link_color)
-        
+
         # Update treeview alternating rows
         tw = self.display_manager.table_widget
         tw.tag_configure('oddrow', background=theme["tree_odd"])
@@ -1008,10 +765,9 @@ class DockerGUI:
         if category == "Docker":
             self.help_panel.pack(side=tk.RIGHT, fill=tk.Y, padx=(8, 0))
 
-        # Show/hide Docker info panel
-        self._docker_info_panel.pack_forget()
+        # The Docker category opens on the landing page until an action shows something else
         if category == "Docker":
-            self._docker_info_panel.pack(fill=tk.X, pady=(0, 6))
+            self.landing.pack(fill=tk.BOTH, expand=True)
 
         # Show/hide terminal panel
         self._terminal_panel.pack_forget()
@@ -1098,9 +854,6 @@ class DockerGUI:
         
         for i in range(max_cols):
             self.btn_frame.columnconfigure(i, weight=0)
-
-        if category == "Docker":
-            self.display_manager.show_text_output(docker_landing_info)
     
     def select_initial_category(self):
         """Select Docker category on startup"""
