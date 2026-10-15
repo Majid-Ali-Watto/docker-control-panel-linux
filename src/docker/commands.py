@@ -9,6 +9,18 @@ Centralized location for all Docker CLI commands used in the application.
 DOCKER_DISK_STORAGE_SIMPLE = "docker system df"
 DOCKER_DISK_USAGE_VERBOSE = "docker system df -v"
 DOCKER_SYSTEM_PRUNE = "docker system prune -f"
+DOCKER_INFO = "docker info"
+DOCKER_VERSION = "docker version"
+DOCKER_BUILDX_LS = "docker buildx ls"
+DOCKER_BUILDER_PRUNE = "docker builder prune -f"
+
+# Context commands
+DOCKER_CONTEXT_LS = "docker context ls --format '{{.Name}}\t{{.Description}}\t{{.DockerEndpoint}}\t{{.Current}}'"
+DOCKER_CONTEXT_USE = "docker context use {context}"
+DOCKER_CONTEXT_INSPECT = "docker context inspect {context}"
+
+# Events commands
+DOCKER_EVENTS = "docker events --since {since}{filters} --format '{{{{.Time}}}}\t{{{{.Type}}}}\t{{{{.Action}}}}\t{{{{.Actor.ID}}}}\t{{{{.Actor.Attributes.name}}}}'"
 
 # Container list commands
 DOCKER_PS_RUNNING = "docker ps --format '{{.ID}}\t{{.Names}}\t{{.Image}}\t{{.Status}}\t{{.Ports}}\t{{.Size}}\t{{.CreatedAt}}'"
@@ -39,12 +51,17 @@ DOCKER_CONTAINER_RENAME = "docker rename {old_name} {new_name}"
 DOCKER_CONTAINER_COMMIT = "docker commit {container} {image}"
 DOCKER_CONTAINER_INSPECT = "docker inspect {container}"
 DOCKER_CONTAINER_LOGS = "docker logs {timestamps_flag} --tail {lines} {container}"
+DOCKER_CONTAINER_LOGS_FOLLOW = "docker logs {timestamps_flag} --tail {lines} --follow {container}"
+DOCKER_CONTAINER_TOP = "docker top {container}"
+DOCKER_CONTAINER_DIFF = "docker diff {container}"
+DOCKER_CONTAINER_EXPORT = "docker export -o {output_file} {container}"
 DOCKER_EXEC_LS = "docker exec {container} ls -la {path}"
 DOCKER_CP_FROM = "docker cp {container}:{src} {dest}"
 DOCKER_CP_TO = "docker cp {src} {container}:{dest}"
 
 # Image commands
 DOCKER_IMAGES_ALL = "docker images --format '{{.Repository}}\t{{.Tag}}\t{{.ID}}\t{{.Size}}\t{{.CreatedAt}}'"
+DOCKER_IMAGES_DANGLING = "docker images --filter dangling=true --format '{{.Repository}}\t{{.Tag}}\t{{.ID}}\t{{.Size}}\t{{.CreatedAt}}'"
 DOCKER_IMAGES_IDS_ALL = "docker images -aq"
 DOCKER_RMI_ALL = "docker rmi -f $(docker images -aq)"
 DOCKER_RMI_ALL_SAFE = "docker rmi -f $(docker images -aq) 2>/dev/null || true"
@@ -53,6 +70,8 @@ DOCKER_IMAGE_PRUNE = "docker image prune -f"
 DOCKER_IMAGE_TAG = "docker tag {source} {target}"
 DOCKER_IMAGE_SAVE = "docker save -o {output_file} {image}"
 DOCKER_IMAGE_LOAD = "docker load -i {input_file}"
+DOCKER_IMAGE_IMPORT = "docker import {input_file} {image}"
+DOCKER_SCOUT_CVES = "docker scout cves {image}"
 DOCKER_IMAGE_BUILD = "docker build {tag}{dockerfile}{build_args}{context}"
 DOCKER_IMAGE_HISTORY = "docker history {image}"
 DOCKER_IMAGE_INSPECT = "docker image inspect {image}"
@@ -89,12 +108,17 @@ DOCKER_COMPOSE_DOWN = "docker compose {files} down"
 DOCKER_COMPOSE_DOWN_VOLUMES = "docker compose {files} down -v"
 DOCKER_COMPOSE_RESTART = "docker compose {files} restart"
 DOCKER_COMPOSE_LOGS = "docker compose {files} logs --tail {lines}"
+DOCKER_COMPOSE_LOGS_FOLLOW = "docker compose {files} logs --tail {lines} --follow"
 DOCKER_COMPOSE_CONFIG = "docker compose {files} config"
 
 # Inspect commands
 DOCKER_INSPECT_IMAGE = "docker inspect --format='{{{{.Image}}}}' {container_id}"
 DOCKER_INSPECT_MOUNTS = "docker inspect --format='{{{{json .Mounts}}}}' {container_name}"
 DOCKER_INSPECT_ANCESTOR = "docker ps -a --filter ancestor={image_id} --format '{{{{.ID}}}}'"
+
+# Registry commands
+DOCKER_LOGIN = "docker login -u {username} --password-stdin{registry}"
+DOCKER_LOGOUT = "docker logout{registry}"
 
 # Pull / push commands
 DOCKER_PULL = "docker pull {image_name}"

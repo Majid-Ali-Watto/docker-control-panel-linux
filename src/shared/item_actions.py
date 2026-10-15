@@ -22,7 +22,10 @@ from src.docker.commands import (
     DOCKER_COMPOSE_RESTART, DOCKER_COMPOSE_LOGS, DOCKER_COMPOSE_CONFIG,
     DOCKER_COMPOSE_PS, DOCKER_INSPECT_ANCESTOR, DOCKER_NETWORK_NAMES,
     DOCKER_RUN_DETACHED,
+    DOCKER_CONTAINER_TOP, DOCKER_CONTAINER_DIFF, DOCKER_CONTAINER_EXPORT,
+    DOCKER_COMPOSE_LOGS_FOLLOW, DOCKER_CONTEXT_USE, DOCKER_CONTEXT_INSPECT,
 )
+from src.containers.details import format_container_details
 from src.ui.ui_components import Tooltip, confirm_action_dialog
 from src.utils.utils import run_cmd, async_run
 from src.shared.helpers import (
@@ -58,13 +61,15 @@ def create_selected_item_actions(action_frame, root, display_manager, refresh_im
             return None
         return [display_manager.get_item_values(item) for item in selection]
 
-    def _run_output_command(command, title):
-        """Read-only commands (inspect, logs, history): show the output as text."""
+    def _run_output_command(command, title, formatter=None):
+        """Read-only commands (inspect, logs, history): show the output as text, optionally
+        reshaped by `formatter` first."""
+        show = _make_output_callback(display_manager.show_text_output, title, None, root)
         run_docker_cmd(
             command,
             sudo=True,
             sudo_password=get_sudo_password(),
-            callback=_make_output_callback(display_manager.show_text_output, title, None, root),
+            callback=(lambda result: show(formatter(result))) if formatter else show,
             loading_callback=show_loading_callback,
         )
 
@@ -227,6 +232,56 @@ def create_selected_item_actions(action_frame, root, display_manager, refresh_im
             "Container Inspect",
         )
 
+    def details_selected_container():
+        if not check_docker_running(): return
+        rows = _selected_rows("container", table_type=_CONTAINER_VIEWS, allow_multiple=False)
+        if not rows:
+            return
+        _run_output_command(
+            DOCKER_CONTAINER_INSPECT.format(container=_quote(rows[0][1])),
+            f"Container Details - {rows[0][2]}",
+            format_container_details,
+        )
+
+    def top_selected_container():
+        if not check_docker_running(): return
+        rows = _selected_rows("container", table_type=_CONTAINER_VIEWS, allow_multiple=False)
+        if not rows:
+            return
+        _run_output_command(
+            DOCKER_CONTAINER_TOP.format(container=_quote(rows[0][1])),
+            f"Container Processes - {rows[0][2]}",
+        )
+
+    def diff_selected_container():
+        if not check_docker_running(): return
+        rows = _selected_rows("container", table_type=_CONTAINER_VIEWS, allow_multiple=False)
+        if not rows:
+            return
+        _run_output_command(
+            DOCKER_CONTAINER_DIFF.format(container=_quote(rows[0][1])),
+            f"Container Changes - {rows[0][2]}  (A added, C changed, D deleted)",
+            lambda result: result or "No changes: the filesystem still matches the image.",
+        )
+
+    def export_selected_container():
+        if not check_docker_running(): return
+        rows = _selected_rows("container", table_type=_CONTAINER_VIEWS, allow_multiple=False)
+        if not rows:
+            return
+        filename = filedialog.asksaveasfilename(
+            parent=root,
+            defaultextension=".tar",
+            filetypes=[("Tar archives", "*.tar"), ("All files", "*.*")],
+            initialfile=f"{rows[0][2]}_export.tar",
+        )
+        if not filename:
+            return
+        _run_mutation(
+            DOCKER_CONTAINER_EXPORT.format(output_file=_quote(filename), container=_quote(rows[0][1])),
+            "Container Export",
+        )
+
     def commit_selected_container():
         if not check_docker_running(): return
         rows = _selected_rows("container", table_type=_CONTAINER_VIEWS, allow_multiple=False)
@@ -310,6 +365,31 @@ def create_selected_item_actions(action_frame, root, display_manager, refresh_im
         _run_output_command(
             DOCKER_IMAGE_HISTORY.format(image=_quote(_image_ref(rows[0]))),
             "Image History",
+        )
+
+    def scan_selected_image():
+        if not check_docker_running(): return
+        rows = _selected_rows("image", table_type=_IMAGE_VIEWS, allow_multiple=False)
+        if not rows:
+            return
+        from src.images.dialogs import scan_image
+        scan_image(root, _image_ref(rows[0]), display_manager.show_text_output, show_loading_callback)
+
+    def use_selected_context():
+        if not check_docker_running(): return
+        rows = _selected_rows("context", table_type='context', allow_multiple=False)
+        if not rows:
+            return
+        _run_mutation(DOCKER_CONTEXT_USE.format(context=_quote(rows[0][1])), "Context Use")
+
+    def inspect_selected_context():
+        if not check_docker_running(): return
+        rows = _selected_rows("context", table_type='context', allow_multiple=False)
+        if not rows:
+            return
+        _run_output_command(
+            DOCKER_CONTEXT_INSPECT.format(context=_quote(rows[0][1])),
+            f"Context Inspect - {rows[0][1]}",
         )
 
     def delete_selected_volume():
@@ -567,9 +647,12 @@ def create_selected_item_actions(action_frame, root, display_manager, refresh_im
         if not files_arg:
             messagebox.showwarning("Missing Compose Files", "This project does not expose compose file paths.")
             return
-        _run_output_command(
-            DOCKER_COMPOSE_LOGS.format(files=files_arg, lines="200"),
-            f"Compose Logs - {project_name}",
+        from src.containers.dialogs import show_logs_window
+        show_logs_window(
+            root, f"Compose Logs - {project_name}", project_name,
+            lambda lines, _timestamps: DOCKER_COMPOSE_LOGS.format(files=files_arg, lines=lines),
+            lambda lines, _timestamps: DOCKER_COMPOSE_LOGS_FOLLOW.format(files=files_arg, lines=lines),
+            timestamps=False,
         )
 
     def compose_services_selected():
@@ -688,6 +771,26 @@ def create_selected_item_actions(action_frame, root, display_manager, refresh_im
                                        command=inspect_selected_container)
     Tooltip(btn_inspect_container, ACTION_TOOLTIPS["inspect_container"])
 
+    btn_container_details = ttk.Button(action_frame, text="🧾 Details",
+                                       style="info.Outline.TButton",
+                                       command=details_selected_container)
+    Tooltip(btn_container_details, ACTION_TOOLTIPS["container_details"])
+
+    btn_container_top = ttk.Button(action_frame, text="🧮 Processes",
+                                   style="secondary.Outline.TButton",
+                                   command=top_selected_container)
+    Tooltip(btn_container_top, ACTION_TOOLTIPS["container_top"])
+
+    btn_container_diff = ttk.Button(action_frame, text="🔀 Changes",
+                                    style="secondary.Outline.TButton",
+                                    command=diff_selected_container)
+    Tooltip(btn_container_diff, ACTION_TOOLTIPS["container_diff"])
+
+    btn_container_export = ttk.Button(action_frame, text="📤 Export",
+                                      style="secondary.Outline.TButton",
+                                      command=export_selected_container)
+    Tooltip(btn_container_export, ACTION_TOOLTIPS["container_export"])
+
     btn_commit_container = ttk.Button(action_frame, text="📦 Commit",
                                       style="secondary.Outline.TButton",
                                       command=commit_selected_container)
@@ -727,6 +830,21 @@ def create_selected_item_actions(action_frame, root, display_manager, refresh_im
                                    style="secondary.Outline.TButton",
                                    command=history_selected_image)
     Tooltip(btn_history_image, ACTION_TOOLTIPS["history_image"])
+
+    btn_scan_image = ttk.Button(action_frame, text="🛡 Scan",
+                                style="warning.Outline.TButton",
+                                command=scan_selected_image)
+    Tooltip(btn_scan_image, ACTION_TOOLTIPS["scan_image"])
+
+    btn_use_context = ttk.Button(action_frame, text="✔ Use",
+                                 style="success.Outline.TButton",
+                                 command=use_selected_context)
+    Tooltip(btn_use_context, ACTION_TOOLTIPS["use_context"])
+
+    btn_inspect_context = ttk.Button(action_frame, text="🔎 Inspect Context",
+                                     style="secondary.Outline.TButton",
+                                     command=inspect_selected_context)
+    Tooltip(btn_inspect_context, ACTION_TOOLTIPS["inspect_context"])
 
     btn_delete_volume = ttk.Button(action_frame, text="🗑 Delete Volume",
                                    style="danger.Outline.TButton",
@@ -834,6 +952,10 @@ def create_selected_item_actions(action_frame, root, display_manager, refresh_im
         'terminal': btn_container_terminal,
         'logs': btn_view_logs,
         'inspect_container': btn_inspect_container,
+        'details': btn_container_details,
+        'top': btn_container_top,
+        'diff': btn_container_diff,
+        'export': btn_container_export,
         'commit': btn_commit_container,
         'browse_files': btn_browse_files,
         'delete_image': btn_delete_image,
@@ -842,6 +964,9 @@ def create_selected_item_actions(action_frame, root, display_manager, refresh_im
         'save_image': btn_save_image,
         'inspect_image': btn_inspect_image,
         'history_image': btn_history_image,
+        'scan_image': btn_scan_image,
+        'use_context': btn_use_context,
+        'inspect_context': btn_inspect_context,
         'delete_volume': btn_delete_volume,
         'inspect_volume': btn_inspect_volume,
         'run': btn_run_container,

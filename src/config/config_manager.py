@@ -5,6 +5,8 @@ Handles application settings, password storage, and configuration management.
 
 import os
 import json
+import shutil
+import subprocess
 from pathlib import Path
 
 # Configuration constants
@@ -36,25 +38,79 @@ def _save_config(config):
     os.chmod(CONFIG_FILE, 0o600)
 
 
+# The sudo password lives in the desktop keyring (libsecret's `secret-tool`) when one is available;
+# only without it does it fall back to the 0600 config file.
+_KEYRING_ATTRS = ["service", "docker-gui", "kind", "sudo-password"]
+
+
+def keyring_available():
+    """True when `secret-tool` (libsecret) is installed."""
+    return shutil.which("secret-tool") is not None
+
+
+def _keyring(*args, input_text=None):
+    """Run secret-tool; (success, stdout). Failure covers a missing tool, a locked or absent keyring."""
+    if not keyring_available():
+        return False, ""
+    try:
+        result = subprocess.run(["secret-tool", *args], input=input_text, capture_output=True,
+                                text=True, timeout=15)
+    except (OSError, subprocess.SubprocessError):
+        return False, ""
+    return result.returncode == 0, result.stdout
+
+
+def _keyring_get():
+    ok, out = _keyring("lookup", *_KEYRING_ATTRS)
+    return out.rstrip("\n") or None if ok else None
+
+
+def _keyring_set(password):
+    return _keyring("store", "--label=Docker Control Panel sudo password", *_KEYRING_ATTRS,
+                    input_text=password)[0]
+
+
+def _drop_file_password():
+    config = _load_config()
+    if config.pop('password', None) is not None:
+        _save_config(config)
+
+
+def password_storage():
+    """Where a saved password would be kept: 'keyring' or 'file'."""
+    return "keyring" if keyring_available() else "file"
+
+
 def load_saved_password():
-    """Load saved password from config file"""
-    return _load_config().get('password', None)
+    """Saved password: from the keyring, else (legacy) from the config file. A file password is
+    moved into the keyring as soon as one is available."""
+    stored = _keyring_get()
+    if stored:
+        return stored
+    legacy = _load_config().get('password', None)
+    if legacy and _keyring_set(legacy):
+        _drop_file_password()
+    return legacy
 
 
 def has_saved_password():
-    """Return whether a saved password exists in config."""
+    """Return whether a saved password exists."""
     return bool(load_saved_password())
 
 
 def save_password(password):
-    """Save password to config file"""
+    """Save the password in the keyring, or in the config file when there is no keyring."""
+    if _keyring_set(password):
+        _drop_file_password()
+        return
     config = _load_config()
     config['password'] = password
     _save_config(config)
 
 
 def delete_saved_password():
-    """Delete saved password"""
+    """Delete the saved password everywhere it may be stored."""
+    _keyring("clear", *_KEYRING_ATTRS)
     config = _load_config()
     config.pop('password', None)
 
@@ -73,6 +129,34 @@ def save_selected_theme(theme_name):
     """Save the selected theme name to config file."""
     config = _load_config()
     config['theme'] = theme_name
+    _save_config(config)
+
+
+# User preferences (Settings dialog), stored under "settings" in the config file
+DEFAULT_SETTINGS = {
+    "stats_interval": 2,       # seconds between Live Stats refreshes
+    "engine": "docker",        # container CLI the app runs: docker | podman
+    "notifications": True,     # desktop notice when a build / pull finishes in the background
+    "terminal": "auto",        # terminal emulator for the container terminal ("auto": first installed)
+}
+
+
+def get_setting(key):
+    """A preference, falling back to its default when unset or of the wrong type."""
+    default = DEFAULT_SETTINGS[key]
+    settings = _load_config().get('settings')
+    value = settings.get(key, default) if isinstance(settings, dict) else default
+    return value if isinstance(value, type(default)) else default
+
+
+def set_setting(key, value):
+    """Persist one preference."""
+    if key not in DEFAULT_SETTINGS:
+        raise KeyError(key)
+    config = _load_config()
+    if not isinstance(config.get('settings'), dict):
+        config['settings'] = {}
+    config['settings'][key] = value
     _save_config(config)
 
 

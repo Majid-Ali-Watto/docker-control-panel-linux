@@ -4,7 +4,7 @@ Instructions for AI coding agents (OpenAI Codex, Codex CLI, and compatible tools
 
 ## What This Project Is
 
-A Python/Tkinter desktop GUI for managing Docker on Linux. Users control containers, images, volumes, networks, Compose projects, and Docker service state — all without typing docker commands manually. Requires a saved sudo password.
+A Python/Tkinter desktop GUI for managing Docker on Linux. Users control containers, images, volumes, networks, Compose projects, and Docker service state — all without typing docker commands manually. Docker runs through sudo with a saved password, unless the user is in the `docker` group (then no password is needed).
 
 ## How to Run
 
@@ -26,7 +26,8 @@ docker-ui-modular/
 ├── assets/
 │   └── docker-icon.svg          # App icon (SVG)
 ├── tests/
-│   └── test_buttons.py          # Unit tests (109 tests, no daemon needed)
+│   ├── test_buttons.py          # Unit tests: command constants and GUI wiring (no daemon needed)
+│   └── test_new_features.py     # Unit tests: settings, keyring storage, engine, events, registry, System category
 └── src/
     ├── config/
     │   ├── config_manager.py    # Password/config I/O (~/.docker-gui/config.json)
@@ -39,11 +40,12 @@ docker-ui-modular/
     │   └── operations.py        # subprocess execution layer
     ├── containers/
     │   ├── actions.py           # Bulk container ops (start/stop/restart/delete all)
-    │   ├── dialogs.py           # File browser, container terminal, logs
+    │   ├── details.py           # Readable container details from docker inspect
+    │   ├── dialogs.py           # File browser, container terminal, shared logs viewer
     │   └── tables.py            # Container Treeview views
     ├── images/
     │   ├── actions.py           # Bulk image ops (prune, delete all)
-    │   ├── dialogs.py           # Pull, push, search Hub, build, load; pull/build status
+    │   ├── dialogs.py           # Pull, push, registry login, search Hub, build, load, import, scan; pull/build status
     │   └── tables.py            # Image Treeview views
     ├── volumes/
     │   ├── actions.py           # Bulk volume ops (prune, delete used/all)
@@ -58,7 +60,12 @@ docker-ui-modular/
     │   └── tables.py            # Compose project Treeview views
     ├── stats/
     │   ├── dialogs.py           # Disk usage detail view
-    │   └── tables.py            # Stats and disk storage Treeview views
+    │   └── tables.py            # Stats (live, trends) and disk storage Treeview views
+    ├── system/
+    │   ├── actions.py           # Info, builders, prune build cache
+    │   ├── dialogs.py           # Live events window
+    │   └── tables.py            # Docker contexts
+
     ├── shared/
     │   ├── context_menus.py     # Right-click menus for table and text views
     │   ├── helpers.py           # Shared formatting / argument-building utilities
@@ -67,6 +74,7 @@ docker-ui-modular/
     ├── ui/
     │   ├── ui_components.py     # Dialogs (password prompt, install prompt, Tooltip)
     │   ├── ui_display.py        # DisplayManager
+    │   ├── settings_dialog.py   # Settings dialog
     │   ├── terminal_panel.py    # Embedded terminal panel
     │   └── keyboard_navigation.py
     ├── help/

@@ -45,6 +45,23 @@ def _files(text):
                      for f in (f.strip() for f in text.split(",")))
 
 
+_EXIT_CODE = re.compile(r"exited \((\d+)\)", re.IGNORECASE)
+
+
+def status_tone(text):
+    """How a container's STATUS reads at a glance: 'bad' (unhealthy, restarting, dead), 'warn'
+    (exited with a non-zero code, paused), 'ok' (healthy) or None (nothing to flag)."""
+    lowered = str(text).lower()
+    if "unhealthy" in lowered or lowered.startswith(("restarting", "dead")):
+        return "bad"
+    exited = _EXIT_CODE.match(lowered.replace("exited(", "exited ("))
+    if (exited and exited.group(1) != "0") or "paused" in lowered:
+        return "warn"
+    if "(healthy)" in lowered:
+        return "ok"
+    return None
+
+
 def format_cell(column, text):
     """The text to show for a cell of `column` (unchanged when there is nothing to improve)."""
     text = str(text)

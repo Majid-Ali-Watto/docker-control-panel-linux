@@ -1250,11 +1250,12 @@ class TestSelectedItemActions(_Base):
     def test_compose_down_volumes_declined_runs_nothing(self, _):
         self.assertIsNone(self._compose_cmd('compose_down_volumes'))
 
-    @patch('src.shared.item_actions.run_docker_cmd')
-    def test_compose_logs(self, mock_run):
+    @patch('src.containers.dialogs.show_logs_window')
+    def test_compose_logs(self, mock_viewer):
         btns = self._build(self._dm('compose', _F_COMPOSE))
         btns['compose_logs'].invoke()
-        cmd = mock_run.call_args[0][0]
+        fetch = mock_viewer.call_args[0][3]
+        cmd = fetch('200', '')
         self.assertIn('docker compose', cmd)
         self.assertIn('logs', cmd)
         self.assertIn('docker-compose.yml', cmd)
@@ -1531,7 +1532,7 @@ class TestDiskUsageView(_TableFixture):
         self.dm.sort_by(4)   # SIZE: 20MB before 187MB
         self.assertEqual([self.tree.item(i)['values'][1] for i in self.tree.get_children()], ["redis", "nginx"])
         self.assertEqual([n for n, _ in self.dm._visible_action_buttons],
-                         ['delete_image', 'inspect_image', 'history_image'])
+                         ['delete_image', 'scan_image', 'inspect_image', 'history_image'])
 
     def test_switching_tabs_keeps_choice_across_reload(self):
         self._open()
@@ -1618,7 +1619,7 @@ class TestTableUsability(_TableFixture):
 
     def test_rows_use_only_alternating_stripe_tags(self):
         tags = {tag for i in self.tree.get_children() for tag in self.tree.item(i)['tags']}
-        self.assertEqual(tags, {'oddrow', 'evenrow'})
+        self.assertEqual({t for t in tags if not t.startswith('status_')}, {'oddrow', 'evenrow'})
 
     def test_text_output_offers_back_to_list(self):
         self.dm.view_refresh = MagicMock()

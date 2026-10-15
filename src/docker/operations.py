@@ -7,7 +7,7 @@ import os
 import signal
 import subprocess
 
-from src.utils.utils import async_run
+from src.utils.utils import async_run, apply_engine
 from src.utils.threads import startThreadForTask
 
 
@@ -24,7 +24,8 @@ def stream_docker_cmd(cmd, sudo=False, sudo_password=None, output_callback=None,
     }
 
     def task():
-        full_cmd = f"sudo -S {cmd}" if sudo and sudo_password else cmd
+        cmd_ = apply_engine(cmd)
+        full_cmd = f"sudo -S {cmd_}" if sudo and sudo_password else cmd_
         process = subprocess.Popen(
             full_cmd,
             shell=True,

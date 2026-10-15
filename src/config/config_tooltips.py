@@ -10,6 +10,7 @@ SIDEBAR_TOOLTIPS = {
     "Networks": "Inspect and manage Docker bridge and user-defined networks",
     "Compose": "Manage Docker Compose projects and their services",
     "Stats": "Monitor real-time container stats and disk usage",
+    "System": "Engine info, contexts, live events and build cache",
     "Terminal": "General-purpose shell — run any command, navigate directories",
 }
 
@@ -34,6 +35,9 @@ CATEGORY_TOOLTIPS = {
         "All": "Show all pulled Docker images",
         "Used": "Show images currently in use by at least one container",
         "Unused": "Show images not attached to any container (safe to delete)",
+        "Dangling": "Show untagged images left behind by rebuilds (what Prune removes)",
+        "Registry": "Log in to or out of Docker Hub or a private registry, and see where you are logged in",
+        "Import": "Create an image from a container export (Containers → Export)",
         "Pull": "Download a new image from Docker Hub\n(e.g. nginx:latest, ubuntu:22.04)",
         "Pull Status": "Reopen the latest image pull progress or final result window",
         "Search Hub": "Search Docker Hub for public images by keyword",
@@ -66,11 +70,19 @@ CATEGORY_TOOLTIPS = {
         "Docker Disk Usage": "Detailed disk usage by images, containers,\nvolumes, and build cache",
         "Disk Storage Simple": "Summary table of total Docker disk usage",
     },
+    "System": {
+        "Info": "Docker version, storage driver, cgroups, root directory and daemon details",
+        "Contexts": "List Docker contexts (local and remote engines) and switch between them",
+        "Events": "Live stream of daemon events: starts, stops, kills, OOMs, health changes",
+        "Builders": "List buildx builders and the platforms they build for",
+        "Prune Build Cache": "Remove the unused build cache to free disk space",
+    },
 }
 
 SIDEBAR_BOTTOM_TOOLTIPS = {
     "change_password": "Change or update the saved sudo password",
     "delete_password": "Remove the saved sudo password from disk",
+    "settings": "Refresh interval, container engine, notifications and terminal",
     "relaunch_app": "Restart the application\n(useful after installing Docker or changing settings)",
 }
 
@@ -85,6 +97,10 @@ ACTION_TOOLTIPS = {
     "container_terminal": "Open an interactive shell inside the selected container",
     "view_logs": "View stdout/stderr logs for the selected container",
     "inspect_container": "Show full docker inspect output for the selected container",
+    "container_details": "Readable summary: state, health, restarts, ports, networks, mounts and environment",
+    "container_top": "List the processes running inside the selected container",
+    "container_diff": "Show files the container added, changed or deleted compared with its image",
+    "container_export": "Export the container's filesystem to a tar archive (import it with Images → Import)",
     "commit_container": "Create a new image snapshot from the selected container",
     "browse_files": "Browse the container filesystem, download or upload files",
     "delete_image": "Delete the selected image(s)",
@@ -92,6 +108,9 @@ ACTION_TOOLTIPS = {
     "tag_image": "Create a new tag for the selected image",
     "save_image": "Export the selected image to a tar archive",
     "inspect_image": "Show detailed metadata for the selected image",
+    "scan_image": "Scan the selected image for known vulnerabilities (docker scout, or trivy if installed)",
+    "use_context": "Make the selected context the active one: every command then targets that engine",
+    "inspect_context": "Show the endpoint and settings of the selected context",
     "history_image": "Show the build/layer history for the selected image",
     "delete_volume": "Permanently remove the selected volume(s)",
     "inspect_volume": "Show detailed metadata for the selected volume",

@@ -8,6 +8,7 @@ from src.config.config_manager import get_sudo_password
 from src.utils.utils import async_run, run_cmd
 from src.docker.commands import (
     DOCKER_IMAGES_ALL,
+    DOCKER_IMAGES_DANGLING,
     DOCKER_PS_IDS_ALL,
     DOCKER_INSPECT_IMAGE,
 )
@@ -24,6 +25,20 @@ def show_images(show_table_callback, show_loading_callback):
         loading_callback=show_loading_callback,
         table_type='image',
         table_title="Images"
+    )
+
+
+def show_dangling_images(show_table_callback, show_loading_callback):
+    """Show untagged (dangling) images, the layers `Prune` would remove"""
+    if not check_docker_running(): return
+    show_table_command(
+        DOCKER_IMAGES_DANGLING,
+        ["REPOSITORY", "TAG", "IMAGE ID", "SIZE", "CREATED"],
+        sudo=True, sudo_password=get_sudo_password(),
+        table_callback=show_table_callback,
+        loading_callback=show_loading_callback,
+        table_type='image',
+        table_title="Dangling Images"
     )
 
 

@@ -7,11 +7,12 @@ Note: Function references will be resolved at import time in the main applicatio
 # place). Every other button runs an action or opens a dialog.
 VIEW_BUTTONS = {
     "Containers": {"All", "Running", "Stopped", "Paused"},
-    "Images": {"All", "Used", "Unused"},
+    "Images": {"All", "Used", "Unused", "Dangling"},
     "Volumes": {"Volumes", "Used", "Unused"},
     "Networks": {"All Networks"},
     "Compose": {"Projects"},
     "Stats": {"Container Stats", "Docker Disk Usage", "Disk Storage Simple"},
+    "System": {"Contexts"},
 }
 
 
@@ -23,7 +24,9 @@ def get_menu_structure(
     prune_images, delete_all_images, show_volumes, show_used_volumes, show_unused_volumes, create_volume, prune_volumes,
     delete_used_volumes, delete_all_volumes, show_networks, create_network, prune_networks,
     show_compose_projects, compose_up_from_file, show_containers_with_stats, docker_disk_usage,
-    docker_disk_storage_simple
+    docker_disk_storage_simple,
+    show_dangling_images, import_image, registry_login,
+    show_system_info, show_contexts, show_events, show_builders, prune_build_cache
 ):
     """
     Returns the menu structure with function references.
@@ -50,12 +53,15 @@ def get_menu_structure(
             ("All", show_images),
             ("Used", show_used_images),
             ("Unused", show_unused_images),
+            ("Dangling", show_dangling_images),
             ("Pull", pull_image),
+            ("Registry", registry_login),
             ("Search Hub", search_hub),
             ("Pull Status", pull_status),
             ("Build", build_image),
             ("Build Status", build_status),
             ("Load", load_image),
+            ("Import", import_image),
             ("Prune (Unused)", prune_images),
             ("Delete All", delete_all_images),
         ],
@@ -82,5 +88,12 @@ def get_menu_structure(
             ("Container Stats", show_containers_with_stats),
             ("Docker Disk Usage", docker_disk_usage),
             ("Disk Storage Simple", docker_disk_storage_simple),
+        ],
+        "System": [
+            ("Info", show_system_info),
+            ("Contexts", show_contexts),
+            ("Events", show_events),
+            ("Builders", show_builders),
+            ("Prune Build Cache", prune_build_cache),
         ],
     }
