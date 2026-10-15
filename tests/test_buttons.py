@@ -2261,23 +2261,53 @@ if __name__ == '__main__':
 class TestCommandsReference(unittest.TestCase):
     """The Commands tab data: complete, unique and flattened for copy / download."""
 
-    def test_every_command_has_a_description_and_none_repeat(self):
+    def test_reference_commands_are_described_and_unique(self):
         from src.help.help_commands import COMMAND_SECTIONS
         commands = [c for _, items in COMMAND_SECTIONS for c, d in items if d]
         self.assertEqual(len(commands), sum(len(items) for _, items in COMMAND_SECTIONS))
         self.assertEqual(len(commands), len(set(commands)))
 
-    def test_text_export_contains_every_command(self):
-        from src.help.help_commands import COMMAND_SECTIONS, commands_as_text
-        text = commands_as_text()
-        for _, items in COMMAND_SECTIONS:
-            for command, description in items:
-                self.assertIn(command, text)
-                self.assertIn(description, text)
+    def test_every_command_constant_is_listed_with_a_description(self):
+        """Adding a constant to commands.py without describing it fails here."""
+        import re
+        from src.docker import commands
+        from src.help.help_commands import APP_COMMAND_SECTIONS, _DESCRIPTIONS, _display_template
+        names = [n for n in dir(commands) if re.fullmatch(r"DOCKER_[A-Z0-9_]+", n)]
+        self.assertEqual([n for n in names if n not in _DESCRIPTIONS], [])
+        self.assertEqual([n for n in _DESCRIPTIONS if n not in names], [])
+        listed = {c for _, items in APP_COMMAND_SECTIONS for c, _d in items}
+        for name in names:
+            self.assertIn(_display_template(name, getattr(commands, name)), listed, name)
 
-    def test_commands_used_by_the_app_are_listed(self):
+    def test_app_commands_have_descriptions_and_no_repeats(self):
+        from src.help.help_commands import APP_COMMAND_SECTIONS
+        items = [i for _, section in APP_COMMAND_SECTIONS for i in section]
+        self.assertTrue(all(d for _c, d in items))
+        commands = [c for c, _d in items]
+        self.assertEqual(len(commands), len(set(commands)))
+
+    def test_templates_are_shown_readably(self):
+        from src.help.help_commands import _display_template
+        self.assertEqual(_display_template("X", "docker stop {containers}"), "docker stop <containers>")
+        self.assertEqual(_display_template("X", "docker compose {files} up -d"), "docker compose -f <file.yml> up -d")
+        self.assertEqual(_display_template("X", "docker inspect --format='{{{{.Image}}}}' {c}"),
+                         "docker inspect --format='{{.Image}}' <c>")
+        self.assertEqual(_display_template("X", "docker ps --format '{{.ID}}\t{{.Names}}'"),
+                         "docker ps --format '{{.ID}}\\t{{.Names}}'")
+
+    def test_app_service_and_inline_commands_are_listed(self):
         from src.help.help_commands import commands_as_text
         text = commands_as_text()
-        for needed in ("docker run -d", "docker stats --no-stream", "docker compose -f <file.yml> build",
-                       "docker rmi -f $(docker images -aq)", "docker image inspect <image>"):
+        for needed in ("systemctl start docker.socket docker.service", "systemctl is-active docker",
+                       "docker exec -it <container> /bin/sh", "docker logs [-t] --follow <container>",
+                       "docker run -d --restart <policy>"):
             self.assertIn(needed, text)
+
+    def test_text_export_contains_every_command(self):
+        from src.help.help_commands import APP_COMMAND_SECTIONS, COMMAND_SECTIONS, commands_as_text
+        text = commands_as_text()
+        for sections in (APP_COMMAND_SECTIONS, COMMAND_SECTIONS):
+            for _, items in sections:
+                for command, description in items:
+                    self.assertIn(command, text)
+                    self.assertIn(description, text)

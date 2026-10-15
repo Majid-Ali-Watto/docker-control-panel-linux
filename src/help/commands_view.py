@@ -1,33 +1,35 @@
 """
-Commands tab: a searchable, filterable list of docker commands, each with its own Copy button.
+Commands tab: searchable docker commands, each with its own Copy button.
 
-Top bar: search box, "Copy all" and "Download". Below: one chip per category, then the commands.
-Clicking a command row or its Copy button copies that command and confirms in the footer.
+Two sets (a switch under the search box): "Used by this app" (generated from
+src/docker/commands.py, so nothing the app runs is missing) and a general "Reference".
+A category dropdown narrows the active set. Click a row or its Copy button to copy a command;
+"Copy all" and "Download" use both sets.
 """
 
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
-from src.help.help_commands import COMMAND_SECTIONS, commands_as_text
+from src.help.help_commands import APP_COMMAND_SECTIONS, COMMAND_SECTIONS, commands_as_text
 from src.ui.scroll_frame import ScrollFrame
 
 _DEFAULT_FILENAME = "docker-commands.txt"
-_ALL = "All"
+_ALL = "All categories"
 _BATCH = 14
+_SETS = {"app": ("Used by this app", APP_COMMAND_SECTIONS), "ref": ("Reference", COMMAND_SECTIONS)}
 
 
 class CommandsTab(ttk.Frame):
     def __init__(self, parent):
         super().__init__(parent)
+        self._set = "app"
         self._category = _ALL
-        self._rows = []             # (frame, section title, searchable text)
-        self._headers = {}          # section title -> header frame
+        self._rows = []             # (frame, set key, section title, searchable text)
+        self._headers = {}          # (set key, section title) -> header frame
         self._shown_headers = set()
         self._pending = []
-        self._chips = {}
 
         self._build_toolbar()
-        self._build_chips()
         self.footer = ttk.Label(self, text="Click a command to copy it.", font=("Arial", 8), anchor=tk.W)
         self.footer.pack(side=tk.BOTTOM, fill=tk.X, padx=10, pady=(2, 6))
         self.list = ScrollFrame(self, pad=8)
@@ -35,30 +37,6 @@ class CommandsTab(ttk.Frame):
         self.empty = ttk.Label(self.list.body, text="No commands match your search.", font=("Arial", 10))
         self._built = False
         self.bind("<Map>", self._build_once)    # the rows are only created when the tab is first shown
-
-    def _build_once(self, _event=None):
-        if self._built:
-            return
-        self._built = True
-        self._pending = [(title.title(), command, description)
-                         for title, commands in COMMAND_SECTIONS for command, description in commands]
-        self._add_batch()
-
-    def _add_batch(self):
-        """Create the rows a few at a time: ~450 widgets at once take over a second to map, so the
-        tab opens immediately and fills in over the next moments."""
-        if not self.winfo_exists():
-            return
-        for section, command, description in self._pending[:_BATCH]:
-            if section not in self._headers:
-                self._headers[section] = self._section_header(section)
-            entry = (self._row(self.list.body, command, description), section, f"{command} {description}".lower())
-            self._rows.append(entry)
-            self._place(*entry)
-        del self._pending[:_BATCH]
-        self._refresh_empty()
-        if self._pending:
-            self.after(5, self._add_batch)
 
     # ---- building -------------------------------------------------------------------
     def _build_toolbar(self):
@@ -72,23 +50,52 @@ class CommandsTab(ttk.Frame):
         self.query.trace_add("write", lambda *_: self._apply_filter())
         ttk.Button(bar, text="📋 Copy all", style="secondary.TButton",
                    command=lambda: self._copy(commands_as_text(), "Copied all commands.")).pack(side=tk.LEFT, padx=(0, 6))
-        ttk.Button(bar, text="⬇ Download", style="secondary.TButton",
-                   command=self._download).pack(side=tk.LEFT)
+        ttk.Button(bar, text="⬇ Download", style="secondary.TButton", command=self._download).pack(side=tk.LEFT)
 
-    def _build_chips(self):
         row = ttk.Frame(self)
         row.pack(fill=tk.X, padx=8, pady=(0, 4))
-        for index, label in enumerate([_ALL] + [title.title() for title, _ in COMMAND_SECTIONS]):
-            chip = ttk.Button(row, text=label, command=lambda l=label: self._select(l))
-            chip.grid(row=index // 4, column=index % 4, padx=2, pady=2, sticky="ew")
-            self._chips[label] = chip
-        for column in range(4):
-            row.columnconfigure(column, weight=1, uniform="chip")
+        self._set_buttons = {}
+        for key, (label, sections) in _SETS.items():
+            count = sum(len(items) for _, items in sections)
+            button = ttk.Button(row, text=f"{label}  ({count})", command=lambda k=key: self._select_set(k))
+            button.pack(side=tk.LEFT, padx=(0, 6))
+            self._set_buttons[key] = button
+        self.category_var = tk.StringVar(value=_ALL)
+        self.category_box = ttk.Combobox(row, textvariable=self.category_var, state="readonly", width=22)
+        self.category_box.pack(side=tk.RIGHT)
+        self.category_box.bind("<<ComboboxSelected>>", lambda _e: self._select_category(self.category_var.get()))
+        self._refresh_categories()
 
-    def _section_header(self, section):
+    def _build_once(self, _event=None):
+        if self._built:
+            return
+        self._built = True
+        self._pending = [(key, title, command, description)
+                         for key, (_label, sections) in _SETS.items()
+                         for title, commands in sections for command, description in commands]
+        self._add_batch()
+
+    def _add_batch(self):
+        """Create the rows a few at a time: hundreds of widgets at once take over a second to map,
+        so the tab opens immediately and fills in over the next moments."""
+        if not self.winfo_exists():
+            return
+        for key, section, command, description in self._pending[:_BATCH]:
+            if (key, section) not in self._headers:
+                self._headers[(key, section)] = self._section_header(key, section)
+            entry = (self._row(self.list.body, command, description), key, section,
+                     f"{command} {description}".lower())
+            self._rows.append(entry)
+            self._place(*entry)
+        del self._pending[:_BATCH]
+        self._refresh_empty()
+        if self._pending:
+            self.after(5, self._add_batch)
+
+    def _section_header(self, key, section):
         header = ttk.Frame(self.list.body)
-        count = len(dict(COMMAND_SECTIONS)[section.upper()])
-        ttk.Label(header, text=f"{section}  ·  {count}", font=("Arial", 10, "bold")).pack(anchor=tk.W, pady=(12, 2))
+        count = len(dict(_SETS[key][1])[section])
+        ttk.Label(header, text=f"{section.title()}  ·  {count}", font=("Arial", 10, "bold")).pack(anchor=tk.W, pady=(12, 2))
         ttk.Separator(header).pack(fill=tk.X)
         return header
 
@@ -116,29 +123,42 @@ class CommandsTab(ttk.Frame):
         return row
 
     # ---- behaviour ------------------------------------------------------------------
-    def _select(self, label):
+    def _refresh_categories(self):
+        titles = [title.title() for title, _ in _SETS[self._set][1]]
+        self.category_box.configure(values=[_ALL] + titles)
+        self.category_var.set(_ALL)
+        self._category = _ALL
+        for key, button in self._set_buttons.items():
+            button.configure(style="primary.TButton" if key == self._set else "secondary.TButton")
+
+    def _select_set(self, key):
+        self._set = key
+        self._refresh_categories()
+        self._apply_filter()
+        self.list.scroll_to_top()
+
+    def _select_category(self, label):
         self._category = label
         self._apply_filter()
         self.list.scroll_to_top()
 
-    def _matches(self, section, haystack):
-        needle = self.query.get().strip().lower().split()
-        return self._category in (_ALL, section) and all(word in haystack for word in needle)
+    def _matches(self, key, section, haystack):
+        if key != self._set or self._category not in (_ALL, section.title()):
+            return False
+        return all(word in haystack for word in self.query.get().strip().lower().split())
 
-    def _place(self, row, section, haystack):
-        """Pack `row` (after its section header) when it matches the current search / category."""
-        if not self._matches(section, haystack):
+    def _place(self, row, key, section, haystack):
+        """Pack `row` (after its section header) when it matches the current set / category / search."""
+        if not self._matches(key, section, haystack):
             return
-        if section not in self._shown_headers:
-            self._headers[section].pack(fill=tk.X)
-            self._shown_headers.add(section)
+        if (key, section) not in self._shown_headers:
+            self._headers[(key, section)].pack(fill=tk.X)
+            self._shown_headers.add((key, section))
         row.pack(fill=tk.X)
 
     def _apply_filter(self):
         if not self._built:
             return
-        for label, chip in self._chips.items():
-            chip.configure(style="primary.TButton" if label == self._category else "secondary.TButton")
         for header in self._headers.values():
             header.pack_forget()
         self._shown_headers = set()
