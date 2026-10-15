@@ -49,7 +49,8 @@ from src.help.help_creator import (
     CREATOR_PORTFOLIO_URL,
     CREATOR_ROLE,
 )
-from src.help.help_info import help_info, docker_landing_info
+from src.help.help_info import docker_landing_info
+from src.help.help_view import build_help_tab
 from src.config.config_menu import get_menu_structure, VIEW_BUTTONS
 
 # Import utility modules
@@ -744,25 +745,11 @@ class DockerGUI:
         self._creator_link_labels = [portfolio_link, github_link]
         
         # Commands tab (copyable / downloadable reference)
-        self._help_cmd_text = build_commands_tab(help_notebook, theme)
+        build_commands_tab(help_notebook)
 
-        # Help tab
-        help_tab = ttk.Frame(help_notebook)
-        help_notebook.add(help_tab, text=" Help ")
-        help_text = tk.Text(
-            help_tab, wrap=tk.WORD,
-            font=("JetBrains Mono", 9),
-            bg=theme["text_bg"], fg=theme["text_fg"],
-            relief=tk.FLAT, borderwidth=0, padx=8, pady=6
-        )
-        help_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        help_scroll = ttk.Scrollbar(help_tab, orient=tk.VERTICAL, command=help_text.yview)
-        help_scroll.pack(side=tk.RIGHT, fill=tk.Y)
-        help_text.configure(yscrollcommand=help_scroll.set)
-        help_text.insert("1.0", help_info)
-        help_text.config(state=tk.DISABLED)
-        self._help_text = help_text
-        
+        # Help tab (collapsible topic cards)
+        build_help_tab(help_notebook)
+
         return help_panel
 
     def open_external_link(self, url):
@@ -942,11 +929,7 @@ class DockerGUI:
             insertbackground=theme["text_fg"]
         )
         
-        # Update help panel text widgets if they exist
-        if hasattr(self, '_help_cmd_text') and self._help_cmd_text.winfo_exists():
-            self._help_cmd_text.configure(bg=theme["text_bg"], fg=theme["text_fg"])
-        if hasattr(self, '_help_text') and self._help_text.winfo_exists():
-            self._help_text.configure(bg=theme["text_bg"], fg=theme["text_fg"])
+        # Commands / Help tabs are built from ttk widgets and follow the theme on their own
         if hasattr(self, '_creator_frame') and self._creator_frame.winfo_exists():
             self._creator_frame.configure(bg=theme["text_bg"])
         if hasattr(self, '_creator_text_labels'):

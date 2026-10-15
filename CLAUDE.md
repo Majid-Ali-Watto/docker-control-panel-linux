@@ -61,13 +61,15 @@ src/
 │   ├── cell_format.py         # format_cell: display-only tidying (dates, sizes, ports, compose files)
 │   ├── popup_menu.py          # PopupMenu: padded, bordered, rounded popup used by the table's right-click menu
 │   ├── table_cells.py         # CellSelection: active table cell (outline + raw value for copying)
+│   ├── scroll_frame.py        # ScrollFrame: scrolling container (wheel, wrap-to-width labels, theme-aware canvas)
 │   ├── terminal_panel.py      # Embedded terminal panel
 │   └── keyboard_navigation.py # Keyboard shortcuts and focus management
 ├── help/
 │   ├── help_commands.py       # COMMAND_SECTIONS (single source of the command reference) + commands_as_text()
-│   ├── commands_view.py       # Commands tab: click a command to copy, Copy all / Copy selection / Download
+│   ├── commands_view.py       # Commands tab: searchable list + category chips, per-row Copy, Copy all / Download (rows built in batches)
+│   ├── help_view.py           # Help tab: searchable collapsible cards rendered from help_info.HELP_SECTIONS
 │   ├── help_creator.py        # Creator name, links shown in Creator tab
-│   └── help_info.py           # Text shown in Help tab
+│   └── help_info.py           # HELP_SECTIONS (structured help content) + docker_landing_info
 └── utils/
     ├── utils.py               # Docker install/running checks, run_cmd, async_run, clean_subprocess_env
     └── threads.py             # Threading helpers for async docker operations
