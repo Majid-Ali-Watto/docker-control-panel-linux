@@ -65,10 +65,14 @@ HELP_SECTIONS = [
         ]),
     ]),
     ("📋", "Commands tab", "Copy or download docker commands", [
+        ("kv", [
+            ("Used by this app", "Every command the app runs, exactly as it runs it (with its --format / --filter options), described by the button that uses it."),
+            ("Reference", "Other common docker commands."),
+        ]),
         ("list", [
-            "Search the list, or narrow it with the category chips.",
-            "Click a command (or its Copy button) to copy just that command.",
-            "“Copy all” copies the whole reference; “Download” saves it as a .txt or .md file.",
+            "Search the list, or narrow it with the category dropdown.",
+            "Click a command (or its Copy button) to copy just that command. <placeholders> are for you to fill in.",
+            "“Copy all” copies both sets; “Download” saves them as a .txt or .md file.",
         ]),
     ]),
     ("🎨", "Themes", "Change the look", [

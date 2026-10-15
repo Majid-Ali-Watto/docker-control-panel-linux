@@ -1,9 +1,195 @@
 """
 Docker commands reference shown in the Commands tab.
 
-COMMAND_SECTIONS is the single source: the Commands tab renders it (click a command to copy it)
-and `commands_as_text()` flattens it for "Copy all" / "Download".
+Two sets:
+  * APP_COMMAND_SECTIONS: what this app runs. Built from the constants in src/docker/commands.py
+    (grouped by that file's section comments, described in _DESCRIPTIONS) plus the few commands
+    that are issued inline elsewhere (_EXTRA_APP_COMMANDS). A constant without a description
+    fails the tests, so a new command cannot be forgotten here.
+  * COMMAND_SECTIONS: a general docker reference.
+`commands_as_text()` flattens both for "Copy all" / "Download".
 """
+
+import re
+from pathlib import Path
+
+from src.docker import commands as _commands
+
+
+# Constants whose templates are awkward to read as built: shown as an equivalent full command
+_DISPLAY_OVERRIDES = {
+    "DOCKER_IMAGE_BUILD": "docker build -t <name:tag> -f <Dockerfile> --build-arg KEY=value <context>",
+    "DOCKER_RUN_DETACHED": ("docker run -d --restart <policy> --name <name> -p <host>:<container> -e KEY=value "
+                            "-v <host_path>:<container_path> --network <network> <image> <command>"),
+    "DOCKER_NETWORK_CREATE": "docker network create --driver <driver> [--subnet <cidr>] <name>",
+    "DOCKER_CONTAINER_LOGS": "docker logs [-t] --tail <lines> <container>",
+}
+
+_DESCRIPTIONS = {
+    # System
+    "DOCKER_DISK_STORAGE_SIMPLE": "Disk usage summary (Stats → Docker Disk Storage)",
+    "DOCKER_DISK_USAGE_VERBOSE": "Detailed disk usage per image, container and volume (Disk Usage tabs)",
+    "DOCKER_SYSTEM_PRUNE": "Remove stopped containers, dangling images and unused networks",
+    # Container lists
+    "DOCKER_PS_RUNNING": "List running containers (Containers → Running)",
+    "DOCKER_PS_ALL": "List all containers (Containers → All)",
+    "DOCKER_PS_STOPPED": "List stopped containers (Containers → Stopped)",
+    "DOCKER_PS_PAUSED": "List paused containers (Containers → Paused)",
+    "DOCKER_PS_IDS_ALL": "IDs of all containers (used by the bulk actions)",
+    "DOCKER_PS_IDS_RUNNING": "IDs of running containers",
+    "DOCKER_PS_NAMES_ALL": "Names of all containers (network connect / rename dialogs)",
+    # Stats
+    "DOCKER_STATS_NO_STREAM": "One-time CPU / memory / network / block I/O snapshot of running containers (Stats)",
+    # Container actions
+    "DOCKER_START_ALL": "Start every container (Containers → Start All)",
+    "DOCKER_STOP_ALL": "Stop every container (Containers → Stop All)",
+    "DOCKER_RESTART_ALL": "Restart every container (Containers → Restart All)",
+    "DOCKER_RM_ALL": "Force-remove every container (Containers → Delete All)",
+    "DOCKER_STOP_ALL_SAFE": "Stop every container, ignoring errors (Docker → Clean All)",
+    "DOCKER_RM_ALL_SAFE": "Remove every container, ignoring errors (Docker → Clean All)",
+    "DOCKER_CONTAINER_START": "Start the selected container(s)",
+    "DOCKER_CONTAINER_STOP": "Stop the selected container(s)",
+    "DOCKER_CONTAINER_RESTART": "Restart the selected container(s)",
+    "DOCKER_CONTAINER_RM": "Force-remove the selected container(s)",
+    "DOCKER_CONTAINER_PAUSE": "Pause the selected container(s)",
+    "DOCKER_CONTAINER_UNPAUSE": "Unpause the selected container(s)",
+    "DOCKER_CONTAINER_RENAME": "Rename a container",
+    "DOCKER_CONTAINER_COMMIT": "Create an image from a container",
+    "DOCKER_CONTAINER_INSPECT": "Show a container's details (JSON)",
+    "DOCKER_CONTAINER_LOGS": "Show a container's last log lines (Logs, optionally with timestamps)",
+    "DOCKER_EXEC_LS": "List a folder inside a container (file browser)",
+    "DOCKER_CP_FROM": "Copy a file from a container to this machine (file browser)",
+    "DOCKER_CP_TO": "Copy a file from this machine into a container (file browser)",
+    # Images
+    "DOCKER_IMAGES_ALL": "List images (Images → All)",
+    "DOCKER_IMAGES_IDS_ALL": "IDs of all images (used by the bulk actions)",
+    "DOCKER_RMI_ALL": "Force-remove every image (Images → Delete All)",
+    "DOCKER_RMI_ALL_SAFE": "Remove every image, ignoring errors (Docker → Clean All)",
+    "DOCKER_IMAGE_RM": "Force-remove the selected image(s)",
+    "DOCKER_IMAGE_PRUNE": "Remove dangling (untagged) images (Images → Prune)",
+    "DOCKER_IMAGE_TAG": "Add a tag to an image",
+    "DOCKER_IMAGE_SAVE": "Save an image to a tar file",
+    "DOCKER_IMAGE_LOAD": "Load an image from a tar file (Images → Load)",
+    "DOCKER_IMAGE_BUILD": "Build an image from a Dockerfile (Images → Build)",
+    "DOCKER_IMAGE_HISTORY": "Show an image's layer history",
+    "DOCKER_IMAGE_INSPECT": "Show an image's details (JSON)",
+    # Volumes
+    "DOCKER_VOLUME_LS_IDS": "Names of all volumes",
+    "DOCKER_VOLUME_LS_DANGLING": "Names of volumes no container uses",
+    "DOCKER_VOLUME_PRUNE": "Remove unused volumes (Volumes → Prune)",
+    "DOCKER_VOLUME_RM_ALL": "Remove every volume (Volumes → Delete All)",
+    "DOCKER_VOLUME_RM_ALL_SAFE": "Remove every volume, ignoring errors (Docker → Clean All)",
+    "DOCKER_VOLUME_CREATE": "Create a volume (Volumes → Create)",
+    "DOCKER_VOLUME_RM": "Remove the selected volume(s)",
+    "DOCKER_VOLUME_INSPECT": "Show a volume's details (JSON)",
+    # Networks
+    "DOCKER_NETWORK_LS": "List networks (Networks)",
+    "DOCKER_NETWORK_NAMES": "Names of all networks (connect dialog)",
+    "DOCKER_NETWORK_CREATE": "Create a network (Networks → Create)",
+    "DOCKER_NETWORK_RM": "Remove the selected network(s)",
+    "DOCKER_NETWORK_INSPECT": "Show a network's details (JSON)",
+    "DOCKER_NETWORK_PRUNE": "Remove unused networks (Networks → Prune)",
+    "DOCKER_NETWORK_CONNECT": "Attach a container to a network",
+    "DOCKER_NETWORK_DISCONNECT": "Detach a container from a network",
+    # Compose
+    "DOCKER_COMPOSE_LS": "List Compose projects (Compose)",
+    "DOCKER_COMPOSE_PS": "List a project's services, including stopped ones",
+    "DOCKER_COMPOSE_UP": "Start a project in the background (Compose → Up From File)",
+    "DOCKER_COMPOSE_UP_BUILD": "Rebuild images, then start a project",
+    "DOCKER_COMPOSE_BUILD": "Build a project's images",
+    "DOCKER_COMPOSE_PULL": "Pull a project's images",
+    "DOCKER_COMPOSE_STOP": "Stop a project without removing it",
+    "DOCKER_COMPOSE_DOWN": "Stop and remove a project's containers and networks",
+    "DOCKER_COMPOSE_DOWN_VOLUMES": "Down, and also remove the project's named volumes",
+    "DOCKER_COMPOSE_RESTART": "Restart a project's services",
+    "DOCKER_COMPOSE_LOGS": "Show a project's last log lines",
+    "DOCKER_COMPOSE_CONFIG": "Show the final merged Compose configuration",
+    # Inspect
+    "DOCKER_INSPECT_IMAGE": "Get the image ID a container was created from",
+    "DOCKER_INSPECT_MOUNTS": "Get a container's mounts as JSON (used to find its volumes)",
+    "DOCKER_INSPECT_ANCESTOR": "IDs of containers created from an image (used by Stop Using / Delete)",
+    # Pull / push
+    "DOCKER_PULL": "Download an image (Images → Pull)",
+    "DOCKER_IMAGE_PUSH": "Upload an image to a registry (Images → Push)",
+    "DOCKER_SEARCH": "Search Docker Hub (Images → Search Hub)",
+    # Run
+    "DOCKER_RUN_DETACHED": "Create and start a container from an image (Images → Run)",
+}
+
+# Commands the app issues inline (not in commands.py): group -> [(command, description)]
+_EXTRA_APP_COMMANDS = {
+    "Service": [
+        ("systemctl is-active docker", "Check whether the Docker service is running (sidebar status)"),
+        ("systemctl start docker.socket docker.service", "Start the Docker service (Docker → Start)"),
+        ("systemctl stop docker.socket docker.service", "Stop the Docker service (Docker → Stop)"),
+        ("systemctl restart docker.socket docker.service", "Restart the Docker service (Docker → Restart)"),
+        ("which docker", "Check that Docker is installed at startup"),
+        ("sudo -S <command>", "How every command above is run: the saved sudo password is sent on stdin"),
+    ],
+    "Container actions": [
+        ("docker exec -it <container> /bin/sh", "Open a shell inside a container (Terminal action)"),
+        ("docker logs [-t] --follow <container>", "Follow a container's logs live (Logs → Follow)"),
+        ("docker inspect --format='{{.State.Status}}' <container>", "Get a container's state (Logs / Terminal)"),
+    ],
+    "Compose": [
+        ("docker rm -f <container_ids>", "Remove leftover containers of a Compose project"),
+    ],
+    "Install Docker": [
+        ("sudo apt-get install -y docker-ce docker-ce-cli containerd.io", "Install Docker Engine (install prompt)"),
+        ("sudo apt-get install docker.io", "Alternative: install Docker from the Ubuntu repository"),
+        ("sudo systemctl enable docker", "Start Docker at boot (install prompt)"),
+        ("sudo apt install tilix", "Install a terminal emulator for the Container Terminal action"),
+    ],
+}
+
+_GROUP_TITLES = {   # commands.py section comment -> title shown in the tab
+    "System": "System", "Container list": "Container lists", "Container stats": "Container stats",
+    "Container actions": "Container actions", "Image": "Images", "Volume": "Volumes",
+    "Network": "Networks", "Compose": "Compose", "Inspect": "Inspect", "Pull / push": "Pull / push / search",
+    "Run": "Run",
+}
+
+
+def _display_template(name, template):
+    """A commands.py template as a readable command: {name} -> <name>, {{{{x}}}} -> {{x}}."""
+    if name in _DISPLAY_OVERRIDES:
+        return _DISPLAY_OVERRIDES[name]
+    text = template.replace("{{{{", "\x00").replace("}}}}", "\x01").replace("{{", "\x00").replace("}}", "\x01")
+    text = text.replace("{files}", "-f <file.yml>")
+    text = re.sub(r"\{(\w+)\}", r"<\1>", text)
+    return text.replace("\x00", "{{").replace("\x01", "}}").replace("\t", "\\t")
+
+
+def _app_constant_groups():
+    """[(group title, [constant names])] in the order commands.py declares them."""
+    groups, current = [], None
+    for line in Path(_commands.__file__).read_text(encoding="utf-8").splitlines():
+        header = re.match(r"# (.+?)( commands?)?$", line)
+        if header and "templates" not in line:
+            current = _GROUP_TITLES.get(header.group(1), header.group(1))
+            groups.append((current, []))
+            continue
+        constant = re.match(r"([A-Z][A-Z0-9_]*) = ", line)
+        if constant and groups:
+            groups[-1][1].append(constant.group(1))
+    return groups
+
+
+def _build_app_sections():
+    sections = {}
+    for title, names in _app_constant_groups():
+        items = sections.setdefault(title, [])
+        for name in names:
+            items.append((_display_template(name, getattr(_commands, name)),
+                          _DESCRIPTIONS.get(name, "")))
+    for title, items in _EXTRA_APP_COMMANDS.items():
+        sections.setdefault(title, []).extend(items)
+    return [(title.upper(), items) for title, items in sections.items()]
+
+
+# (title, [(command, description)]) — see the module docstring
+APP_COMMAND_SECTIONS = _build_app_sections()
+
 
 COMMAND_SECTIONS = [
     ("SERVICE", [
@@ -139,13 +325,12 @@ COMMANDS_TITLE = "DOCKER COMMAND REFERENCE"
 
 
 def commands_as_text():
-    """The whole reference as plain text (Copy all / Download)."""
+    """Both sets as plain text (Copy all / Download)."""
     lines = [COMMANDS_TITLE, "=" * len(COMMANDS_TITLE), ""]
-    for title, commands in COMMAND_SECTIONS:
-        lines += [f"── {title} " + "─" * max(3, 48 - len(title)), ""]
-        for command, description in commands:
-            lines += [f"  {command}", f"    {description}", ""]
+    for heading, sections in (("USED BY THIS APP", APP_COMMAND_SECTIONS), ("GENERAL REFERENCE", COMMAND_SECTIONS)):
+        lines += ["#" * 3 + f" {heading} " + "#" * 3, ""]
+        for title, commands in sections:
+            lines += [f"── {title} " + "─" * max(3, 48 - len(title)), ""]
+            for command, description in commands:
+                lines += [f"  {command}", f"    {description}", ""]
     return "\n".join(lines).rstrip() + "\n"
-
-
-commands_info = commands_as_text()
