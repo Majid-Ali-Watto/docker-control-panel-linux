@@ -2286,6 +2286,20 @@ class TestCommandsReference(unittest.TestCase):
         commands = [c for c, _d in items]
         self.assertEqual(len(commands), len(set(commands)))
 
+    def test_compose_commands_are_listed_with_and_without_a_file(self):
+        from src.help.help_commands import APP_COMMAND_SECTIONS, COMMAND_SECTIONS, _display_variants
+        self.assertEqual([c for c, _d in _display_variants("X", "docker compose {files} up -d", "Up")],
+                         ["docker compose up -d", "docker compose -f <file.yml> up -d"])
+        app = {c for _, items in APP_COMMAND_SECTIONS for c, _d in items}
+        for needed in ("docker compose up -d", "docker compose -f <file.yml> up -d", "docker compose down -v",
+                       "docker compose logs --tail <lines>", "docker compose config"):
+            self.assertIn(needed, app)
+        reference = {c for _, items in COMMAND_SECTIONS for c, _d in items}
+        for needed in ("docker compose up", "docker compose up -d", "docker compose up --build",
+                       "docker compose up -d --build", "docker compose down", "docker compose logs -f",
+                       "docker compose exec <service> sh", "docker compose -f <a.yml> -f <b.yml> up -d"):
+            self.assertIn(needed, reference)
+
     def test_templates_are_shown_readably(self):
         from src.help.help_commands import _display_template
         self.assertEqual(_display_template("X", "docker stop {containers}"), "docker stop <containers>")

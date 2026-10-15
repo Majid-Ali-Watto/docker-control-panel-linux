@@ -72,6 +72,7 @@ HELP_SECTIONS = [
         ("list", [
             "Search the list, or narrow it with the category dropdown.",
             "Click a command (or its Copy button) to copy just that command. <placeholders> are for you to fill in.",
+            "Compose commands are listed both ways: without -f (when you are in the project folder) and with -f <file.yml>.",
             "“Copy all” copies both sets; “Download” saves them as a .txt or .md file.",
         ]),
     ]),
