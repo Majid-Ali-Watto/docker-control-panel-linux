@@ -18,7 +18,7 @@ def show_running_containers(show_table_callback, show_loading_callback, append=F
     if not check_docker_running(): return
     show_table_command(
         DOCKER_PS_RUNNING,
-        ["CONTAINER ID", "NAMES", "IMAGE", "STATUS", "PORTS", "SIZE"],
+        ["CONTAINER ID", "NAMES", "IMAGE", "STATUS", "PORTS", "SIZE", "CREATED"],
         sudo=True, sudo_password=get_sudo_password(),
         table_callback=show_table_callback,
         loading_callback=show_loading_callback,
@@ -33,7 +33,7 @@ def show_all_containers(show_table_callback, show_loading_callback):
     if not check_docker_running(): return
     show_table_command(
         DOCKER_PS_ALL,
-        ["CONTAINER ID", "NAMES", "IMAGE", "STATUS", "PORTS", "SIZE"],
+        ["CONTAINER ID", "NAMES", "IMAGE", "STATUS", "PORTS", "SIZE", "CREATED"],
         sudo=True, sudo_password=get_sudo_password(),
         table_callback=show_table_callback,
         loading_callback=show_loading_callback,
@@ -47,7 +47,7 @@ def show_stopped_containers(show_table_callback, show_loading_callback, append=F
     if not check_docker_running(): return
     show_table_command(
         DOCKER_PS_STOPPED,
-        ["CONTAINER ID", "NAMES", "IMAGE", "STATUS", "PORTS", "SIZE"],
+        ["CONTAINER ID", "NAMES", "IMAGE", "STATUS", "PORTS", "SIZE", "CREATED"],
         sudo=True, sudo_password=get_sudo_password(),
         table_callback=show_table_callback,
         loading_callback=show_loading_callback,
@@ -62,7 +62,7 @@ def show_paused_containers(show_table_callback, show_loading_callback, append=Fa
     if not check_docker_running(): return
     show_table_command(
         DOCKER_PS_PAUSED,
-        ["CONTAINER ID", "NAMES", "IMAGE", "STATUS", "PORTS", "SIZE"],
+        ["CONTAINER ID", "NAMES", "IMAGE", "STATUS", "PORTS", "SIZE", "CREATED"],
         sudo=True, sudo_password=get_sudo_password(),
         table_callback=show_table_callback,
         loading_callback=show_loading_callback,

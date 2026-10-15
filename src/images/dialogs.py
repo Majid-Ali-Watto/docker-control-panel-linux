@@ -2,6 +2,7 @@
 Image dialogs: pull, push, search hub, build, load.
 """
 
+from src.ui.rounded import readable_color
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
 import threading
@@ -69,7 +70,7 @@ def pull_image_dialog(root, refresh_callback):
     image_entry.focus()
 
     ttk.Label(dialog, text="Leave empty for 'latest' tag",
-              font=("Arial", 8), foreground="gray").pack(pady=(0, 4))
+              font=("Arial", 8), foreground=readable_color("gray")).pack(pady=(0, 4))
 
     btn_frame = ttk.Frame(dialog)
     btn_frame.pack(pady=(8, 20))
@@ -130,7 +131,7 @@ def push_image_dialog(root, image_ref="", refresh_callback=None):
     ttk.Label(
         dialog,
         text="Examples:  docker.io/username/myimage:1.0   or   myregistry.io/repo:tag",
-        font=("Arial", 8), foreground="gray",
+        font=("Arial", 8), foreground=readable_color("gray"),
     ).pack(padx=20, anchor="w")
 
     status_label = ttk.Label(dialog, text="", font=("Arial", 9))
@@ -150,7 +151,7 @@ def push_image_dialog(root, image_ref="", refresh_callback=None):
             messagebox.showwarning("Input Required", "Please enter an image name.", parent=dialog)
             return
         btn_push.config(state=tk.DISABLED)
-        status_label.config(text="⏳ Pushing image… (this may take a while)", foreground="orange")
+        status_label.config(text="⏳ Pushing image… (this may take a while)", foreground=readable_color("orange"))
         dialog.update()
 
         def push_task():
@@ -165,13 +166,13 @@ def push_image_dialog(root, image_ref="", refresh_callback=None):
     def on_push_complete(result):
         result_lower = result.lower()
         if any(k in result_lower for k in ("pushed", "digest:", "layer already exists", "latest: digest")):
-            status_label.config(text="✅ Image pushed successfully!", foreground="green")
+            status_label.config(text="✅ Image pushed successfully!", foreground=readable_color("green"))
             dialog.after(2000, dialog.destroy)
             if refresh_callback:
                 root.after(2100, refresh_callback)
         else:
             btn_push.config(state=tk.NORMAL)
-            status_label.config(text="❌ Push failed", foreground="red")
+            status_label.config(text="❌ Push failed", foreground=readable_color("red"))
             messagebox.showerror("Push Failed", f"Failed to push image:\n{result[:500]}", parent=dialog)
 
     btn_push.config(command=on_push)
@@ -202,7 +203,7 @@ def search_hub_dialog(root, refresh_callback=None, show_text_output=None):
     btn_search.pack(side=tk.LEFT, padx=(6, 0))
 
     status_label = ttk.Label(dialog, text="Type a term and press Search or Enter",
-                              font=("Arial", 9), foreground="gray")
+                              font=("Arial", 9), foreground=readable_color("gray"))
     status_label.pack(padx=12, anchor="w", pady=(2, 0))
 
     table_frame = ttk.Frame(dialog)
@@ -227,7 +228,7 @@ def search_hub_dialog(root, refresh_callback=None, show_text_output=None):
                           state=tk.DISABLED)
     btn_pull.pack(side=tk.LEFT)
     ttk.Label(footer, text="Double-click or select + Pull to download",
-              font=("Arial", 8), foreground="gray").pack(side=tk.LEFT, padx=10)
+              font=("Arial", 8), foreground=readable_color("gray")).pack(side=tk.LEFT, padx=10)
     ttk.Button(footer, text="Close", width=10, command=dialog.destroy).pack(side=tk.RIGHT)
 
     def do_search():
@@ -237,7 +238,7 @@ def search_hub_dialog(root, refresh_callback=None, show_text_output=None):
             return
         btn_search.config(state=tk.DISABLED)
         btn_pull.config(state=tk.DISABLED)
-        status_label.config(text=f"⏳ Searching for '{term}'…", foreground="orange")
+        status_label.config(text=f"⏳ Searching for '{term}'…", foreground=readable_color("orange"))
         for row in table.get_children():
             table.delete(row)
         dialog.update()
@@ -262,9 +263,9 @@ def search_hub_dialog(root, refresh_callback=None, show_text_output=None):
 
         if not rows:
             if result.strip() and any(w in result.lower() for w in ('error', 'permission', 'denied', 'failed', 'cannot')):
-                status_label.config(text=f"Search error: {result.strip()[:120]}", foreground="red")
+                status_label.config(text=f"Search error: {result.strip()[:120]}", foreground=readable_color("red"))
             else:
-                status_label.config(text=f"No results found for '{term}'", foreground="gray")
+                status_label.config(text=f"No results found for '{term}'", foreground=readable_color("gray"))
             return
 
         item_ids = []
@@ -274,7 +275,7 @@ def search_hub_dialog(root, refresh_callback=None, show_text_output=None):
             item_ids.append(iid)
         status_label.config(
             text=f"Found {len(rows)} result(s) — select one and click Pull to download",
-            foreground="green",
+            foreground=readable_color("green"),
         )
 
         image_names = [str(table.item(iid)['values'][0]) for iid in item_ids]

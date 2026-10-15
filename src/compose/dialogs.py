@@ -1,16 +1,17 @@
 """
-Compose dialogs: compose up from file.
+Compose dialogs: compose up from files or a project folder.
 """
 
+import os
 import re
 import tkinter as tk
-from tkinter import messagebox, filedialog
+from tkinter import ttk, messagebox, filedialog
 
 from src.docker.actions import check_docker_running
-from src.config.config_manager import get_sudo_password
+from src.config.config_manager import get_sudo_password, load_compose_projects, save_compose_project
 from src.docker.operations import run_docker_cmd
-from src.docker.commands import DOCKER_COMPOSE_UP
-from src.shared.helpers import _compose_files_to_args, _ERROR_HINTS
+from src.docker.commands import DOCKER_COMPOSE_UP, DOCKER_COMPOSE_UP_BUILD
+from src.shared.helpers import _join_flag_values, _center_dialog, _ERROR_HINTS
 from src.utils.threads import startThreadForTask
 from src.utils.utils import run_cmd
 
@@ -24,31 +25,99 @@ def _parse_conflict_container_ids(output):
     )
 
 
+# Default file names docker compose looks for in a project folder (in its order of precedence)
+_COMPOSE_FILE_NAMES = ("compose.yaml", "compose.yml", "docker-compose.yml", "docker-compose.yaml")
+
+
+def _compose_files_in_folder(folder):
+    """The compose file docker would pick in a folder, plus the override file it merges with it."""
+    for name in _COMPOSE_FILE_NAMES:
+        base = os.path.join(folder, name)
+        if os.path.isfile(base):
+            stem = os.path.splitext(base)[0]
+            overrides = [p for p in (f"{stem}.override.yaml", f"{stem}.override.yml") if os.path.isfile(p)]
+            return [base] + overrides[:1]
+    return []
+
+
+def _last_project_dir():
+    projects = load_compose_projects()
+    return os.path.dirname(projects[-1][0]) if projects else None
+
+
+def _ask_compose_files(root):
+    """Let the user pick compose files or a project folder and whether to rebuild images.
+
+    Returns (paths, build) or None when cancelled.
+    """
+    start_dir = _last_project_dir()
+    chosen = []
+    build_var = tk.BooleanVar(master=root, value=False)
+
+    dialog = tk.Toplevel(root)
+    dialog.title("Compose Up")
+    dialog.transient(root)
+    dialog.grab_set()
+
+    def pick_files():
+        files = filedialog.askopenfilenames(
+            parent=dialog, title="Select Compose File(s)", initialdir=start_dir,
+            filetypes=[("Compose files", "*.yml *.yaml"), ("All files", "*.*")])
+        if files:
+            chosen.extend(files)
+            dialog.destroy()
+
+    def pick_folder():
+        folder = filedialog.askdirectory(parent=dialog, title="Select Project Folder",
+                                         initialdir=start_dir, mustexist=True)
+        if not folder:
+            return
+        files = _compose_files_in_folder(folder)
+        if not files:
+            messagebox.showerror(
+                "No Compose File Found",
+                f"No compose file in:\n{folder}\n\nExpected one of: {', '.join(_COMPOSE_FILE_NAMES)}",
+                parent=dialog)
+            return
+        chosen.extend(files)
+        dialog.destroy()
+
+    ttk.Label(dialog, text="Start a compose project from:", font=("Arial", 10)).pack(padx=20, pady=(20, 8))
+    ttk.Checkbutton(dialog, text="Rebuild images first (--build)", variable=build_var).pack(padx=20, anchor="w")
+    btn_frame = ttk.Frame(dialog)
+    btn_frame.pack(padx=20, pady=(4, 20))
+    ttk.Button(btn_frame, text="Compose File(s)…", style="primary.TButton",
+               command=pick_files, width=18).pack(side=tk.LEFT, padx=5)
+    ttk.Button(btn_frame, text="Project Folder…", style="primary.TButton",
+               command=pick_folder, width=18).pack(side=tk.LEFT, padx=5)
+    ttk.Button(btn_frame, text="Cancel", command=dialog.destroy, width=10).pack(side=tk.LEFT, padx=5)
+    dialog.bind("<Escape>", lambda e: dialog.destroy())
+    _center_dialog(dialog, min_width=460)
+    dialog.wait_window()
+    return (chosen, build_var.get()) if chosen else None
+
+
 def compose_up_from_file_dialog(root, show_text_output_callback, refresh_callback=None, show_loading_callback=None):
-    """Start a compose project from a selected compose file."""
+    """Start a compose project from selected compose file(s) or a project folder."""
     if not check_docker_running(): return
 
-    filename = filedialog.askopenfilename(
-        parent=root,
-        title="Select Compose File",
-        filetypes=[
-            ("Compose files", "*.yml *.yaml"),
-            ("All files", "*.*"),
-        ],
-    )
-    if not filename:
+    selection = _ask_compose_files(root)
+    if not selection:
         return
+    files, build = selection
 
-    # Validate: file must contain a 'services:' key
+    # Validate: at least one file must contain a 'services:' key
     try:
-        with open(filename, 'r') as fh:
-            content = fh.read()
-        if 'services:' not in content:
+        contents = []
+        for path in files:
+            with open(path, 'r') as fh:
+                contents.append(fh.read())
+        if not any('services:' in content for content in contents):
             messagebox.showerror(
                 "Invalid Compose File",
                 f"The selected file does not appear to be a valid Docker Compose file "
                 f"(no 'services:' key found).\n\n"
-                f"File: {filename}\n\n"
+                f"File: {files[0]}\n\n"
                 f"Tip: look for a file named docker-compose.yml that contains a 'services:' section.",
                 parent=root,
             )
@@ -57,9 +126,12 @@ def compose_up_from_file_dialog(root, show_text_output_callback, refresh_callbac
         messagebox.showerror("Cannot Read File", str(exc), parent=root)
         return
 
+    # Remembered so the project stays in the Projects list (and can be started again) after `down`
+    save_compose_project(files)
+
     def _run_compose_up():
-        files_arg = _compose_files_to_args(filename)
-        command = DOCKER_COMPOSE_UP.format(files=files_arg)
+        files_arg = _join_flag_values('-f', files).strip()
+        command = (DOCKER_COMPOSE_UP_BUILD if build else DOCKER_COMPOSE_UP).format(files=files_arg)
         run_docker_cmd(
             command,
             sudo=True,

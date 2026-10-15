@@ -18,7 +18,7 @@ def show_images(show_table_callback, show_loading_callback):
     if not check_docker_running(): return
     show_table_command(
         DOCKER_IMAGES_ALL,
-        ["REPOSITORY", "TAG", "IMAGE ID", "SIZE"],
+        ["REPOSITORY", "TAG", "IMAGE ID", "SIZE", "CREATED"],
         sudo=True, sudo_password=get_sudo_password(),
         table_callback=show_table_callback,
         loading_callback=show_loading_callback,
@@ -53,7 +53,7 @@ def show_unused_images(show_table_callback, show_loading_callback, append=False)
                         used_image_ids.add(image_sha[:12])
 
         unused_rows = [row for row in all_image_rows if row[2] not in used_image_ids]
-        show_table_callback(["REPOSITORY", "TAG", "IMAGE ID", "SIZE"], unused_rows,
+        show_table_callback(["REPOSITORY", "TAG", "IMAGE ID", "SIZE", "CREATED"], unused_rows,
                           'image', "Unused Images", append)
 
     async_run(
@@ -88,7 +88,7 @@ def show_used_images(show_table_callback, show_loading_callback, append=False):
                         used_image_ids.add(image_sha[:12])
 
         used_rows = [row for row in all_image_rows if row[2] in used_image_ids]
-        show_table_callback(["REPOSITORY", "TAG", "IMAGE ID", "SIZE"], used_rows,
+        show_table_callback(["REPOSITORY", "TAG", "IMAGE ID", "SIZE", "CREATED"], used_rows,
                           'image', "Used Images", append)
 
     async_run(

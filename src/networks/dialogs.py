@@ -27,7 +27,7 @@ def create_network_dialog(root, show_text_output_callback, refresh_callback=None
 
     ttk.Label(dialog, text="Driver:", font=("Arial", 10)).grid(row=1, column=0, sticky="w", padx=16, pady=6)
     driver_var = tk.StringVar(value="bridge")
-    ttk.Combobox(dialog, textvariable=driver_var, values=["bridge", "overlay", "host", "macvlan"], state="readonly", width=20).grid(row=1, column=1, sticky="w", padx=16, pady=6)
+    ttk.Combobox(dialog, textvariable=driver_var, values=["bridge", "overlay", "host", "macvlan"], state="readonly", width=36).grid(row=1, column=1, sticky="ew", padx=16, pady=6)
 
     ttk.Label(dialog, text="Subnet (optional):", font=("Arial", 10)).grid(row=2, column=0, sticky="w", padx=16, pady=6)
     subnet_var = tk.StringVar()

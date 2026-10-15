@@ -17,6 +17,8 @@ from src.docker.commands import (
     DOCKER_IMAGE_INSPECT, DOCKER_VOLUME_RM, DOCKER_VOLUME_INSPECT,
     DOCKER_NETWORK_RM, DOCKER_NETWORK_INSPECT, DOCKER_NETWORK_CONNECT,
     DOCKER_NETWORK_DISCONNECT, DOCKER_COMPOSE_UP, DOCKER_COMPOSE_DOWN,
+    DOCKER_COMPOSE_UP_BUILD, DOCKER_COMPOSE_BUILD, DOCKER_COMPOSE_PULL, DOCKER_COMPOSE_STOP,
+    DOCKER_COMPOSE_DOWN_VOLUMES,
     DOCKER_COMPOSE_RESTART, DOCKER_COMPOSE_LOGS, DOCKER_COMPOSE_CONFIG,
     DOCKER_COMPOSE_PS, DOCKER_INSPECT_ANCESTOR, DOCKER_NETWORK_NAMES,
     DOCKER_RUN_DETACHED,
@@ -25,9 +27,16 @@ from src.ui.ui_components import Tooltip, confirm_action_dialog
 from src.utils.utils import run_cmd, async_run
 from src.shared.helpers import (
     _quote, _join_quoted, _join_flag_values, _split_csv_lines,
-    _compose_files_to_args, _center_dialog, _make_output_callback,
+    _compose_files_to_args, _center_dialog, _make_output_callback, is_error_output,
 )
 import shlex
+
+
+# Table types a row action accepts: the dedicated list plus the Docker Disk Usage tabs, whose
+# rows start with the same identifying columns (container ID / image repo+tag+ID / volume name)
+_CONTAINER_VIEWS = ('container', 'container_stats', 'disk_containers')
+_IMAGE_VIEWS = ('image', 'disk_images')
+_VOLUME_VIEWS = ('volume', 'disk_volumes')
 
 
 def create_selected_item_actions(action_frame, root, display_manager, refresh_images_callback, show_loading_callback=None):
@@ -50,11 +59,33 @@ def create_selected_item_actions(action_frame, root, display_manager, refresh_im
         return [display_manager.get_item_values(item) for item in selection]
 
     def _run_output_command(command, title):
+        """Read-only commands (inspect, logs, history): show the output as text."""
         run_docker_cmd(
             command,
             sudo=True,
             sudo_password=get_sudo_password(),
             callback=_make_output_callback(display_manager.show_text_output, title, None, root),
+            loading_callback=show_loading_callback,
+        )
+
+    def _run_mutation(command, title):
+        """Commands that change state: keep the table on screen, report the result in the
+        status bar and reload the list in place. Failures show the full output instead."""
+        def on_done(result):
+            def finish():
+                if is_error_output(result):
+                    display_manager.show_text_output(f"{title} failed\n\n{result}".strip())
+                    display_manager.set_status(f"✖ {title} failed — details shown above", "error")
+                else:
+                    display_manager.set_status(f"✔ {title} done", "success")
+                    display_manager.refresh_view()
+            root.after(0, finish)
+
+        run_docker_cmd(
+            command,
+            sudo=True,
+            sudo_password=get_sudo_password(),
+            callback=on_done,
             loading_callback=show_loading_callback,
         )
 
@@ -112,83 +143,83 @@ def create_selected_item_actions(action_frame, root, display_manager, refresh_im
 
     def start_selected_container():
         if not check_docker_running(): return
-        rows = _selected_rows("container", table_type=('container', 'container_stats'))
+        rows = _selected_rows("container", table_type=_CONTAINER_VIEWS)
         if not rows:
             return
-        _run_output_command(
+        _run_mutation(
             DOCKER_CONTAINER_START.format(containers=_join_quoted(_container_ids(rows))),
             "Container Start",
         )
 
     def stop_selected_container():
         if not check_docker_running(): return
-        rows = _selected_rows("container", table_type=('container', 'container_stats'))
+        rows = _selected_rows("container", table_type=_CONTAINER_VIEWS)
         if not rows:
             return
-        _run_output_command(
+        _run_mutation(
             DOCKER_CONTAINER_STOP.format(containers=_join_quoted(_container_ids(rows))),
             "Container Stop",
         )
 
     def restart_selected_container():
         if not check_docker_running(): return
-        rows = _selected_rows("container", table_type=('container', 'container_stats'))
+        rows = _selected_rows("container", table_type=_CONTAINER_VIEWS)
         if not rows:
             return
-        _run_output_command(
+        _run_mutation(
             DOCKER_CONTAINER_RESTART.format(containers=_join_quoted(_container_ids(rows))),
             "Container Restart",
         )
 
     def pause_selected_container():
         if not check_docker_running(): return
-        rows = _selected_rows("container", table_type=('container', 'container_stats'))
+        rows = _selected_rows("container", table_type=_CONTAINER_VIEWS)
         if not rows:
             return
-        _run_output_command(
+        _run_mutation(
             DOCKER_CONTAINER_PAUSE.format(containers=_join_quoted(_container_ids(rows))),
             "Container Pause",
         )
 
     def unpause_selected_container():
         if not check_docker_running(): return
-        rows = _selected_rows("container", table_type=('container', 'container_stats'))
+        rows = _selected_rows("container", table_type=_CONTAINER_VIEWS)
         if not rows:
             return
-        _run_output_command(
+        _run_mutation(
             DOCKER_CONTAINER_UNPAUSE.format(containers=_join_quoted(_container_ids(rows))),
             "Container Unpause",
         )
 
     def rename_selected_container():
         if not check_docker_running(): return
-        rows = _selected_rows("container", table_type=('container', 'container_stats'), allow_multiple=False)
+        rows = _selected_rows("container", table_type=_CONTAINER_VIEWS, allow_multiple=False)
         if not rows:
             return
         new_name = _prompt_value("Rename Container", "New container name:", _container_name(rows[0]))
         if not new_name:
             return
-        _run_output_command(
+        _run_mutation(
             DOCKER_CONTAINER_RENAME.format(old_name=_quote(rows[0][1]), new_name=_quote(new_name)),
             "Container Rename",
         )
 
     def delete_selected_container():
         if not check_docker_running(): return
-        rows = _selected_rows("container", table_type=('container', 'container_stats'))
+        rows = _selected_rows("container", table_type=_CONTAINER_VIEWS)
         if not rows:
             return
         count = len(rows)
         msg = f"Delete {count} container(s)?" if count > 1 else f"Delete container {rows[0][1]}?"
         if confirm_action_dialog(root, "Confirm", msg):
-            _run_output_command(
+            _run_mutation(
                 DOCKER_CONTAINER_RM.format(containers=_join_quoted(_container_ids(rows))),
                 "Container Delete",
             )
 
     def inspect_selected_container():
         if not check_docker_running(): return
-        rows = _selected_rows("container", table_type=('container', 'container_stats'), allow_multiple=False)
+        rows = _selected_rows("container", table_type=_CONTAINER_VIEWS, allow_multiple=False)
         if not rows:
             return
         _run_output_command(
@@ -198,26 +229,26 @@ def create_selected_item_actions(action_frame, root, display_manager, refresh_im
 
     def commit_selected_container():
         if not check_docker_running(): return
-        rows = _selected_rows("container", table_type=('container', 'container_stats'), allow_multiple=False)
+        rows = _selected_rows("container", table_type=_CONTAINER_VIEWS, allow_multiple=False)
         if not rows:
             return
         image_ref = _prompt_value("Commit Container", "New image name (e.g. myapp:snapshot):")
         if not image_ref:
             return
-        _run_output_command(
+        _run_mutation(
             DOCKER_CONTAINER_COMMIT.format(container=_quote(rows[0][1]), image=_quote(image_ref)),
             "Container Commit",
         )
 
     def delete_selected_image():
         if not check_docker_running(): return
-        rows = _selected_rows("image", table_type='image')
+        rows = _selected_rows("image", table_type=_IMAGE_VIEWS)
         if not rows:
             return
         count = len(rows)
         msg = f"Delete {count} image(s)?" if count > 1 else f"Delete image {_image_ref(rows[0])}?"
         if confirm_action_dialog(root, "Confirm", msg):
-            _run_output_command(
+            _run_mutation(
                 DOCKER_IMAGE_RM.format(images=' '.join(_quote(row[3]) for row in rows)),
                 "Image Delete",
             )
@@ -230,7 +261,7 @@ def create_selected_item_actions(action_frame, root, display_manager, refresh_im
         target_tag = _prompt_value("Tag Image", "New tag (e.g. repo:tag):")
         if not target_tag:
             return
-        _run_output_command(
+        _run_mutation(
             DOCKER_IMAGE_TAG.format(source=_quote(_image_ref(rows[0])), target=_quote(target_tag)),
             "Image Tag",
         )
@@ -256,14 +287,14 @@ def create_selected_item_actions(action_frame, root, display_manager, refresh_im
         )
         if not filename:
             return
-        _run_output_command(
+        _run_mutation(
             DOCKER_IMAGE_SAVE.format(output_file=_quote(filename), image=_quote(_image_ref(rows[0]))),
             "Image Save",
         )
 
     def inspect_selected_image():
         if not check_docker_running(): return
-        rows = _selected_rows("image", table_type='image', allow_multiple=False)
+        rows = _selected_rows("image", table_type=_IMAGE_VIEWS, allow_multiple=False)
         if not rows:
             return
         _run_output_command(
@@ -273,7 +304,7 @@ def create_selected_item_actions(action_frame, root, display_manager, refresh_im
 
     def history_selected_image():
         if not check_docker_running(): return
-        rows = _selected_rows("image", table_type='image', allow_multiple=False)
+        rows = _selected_rows("image", table_type=_IMAGE_VIEWS, allow_multiple=False)
         if not rows:
             return
         _run_output_command(
@@ -283,20 +314,20 @@ def create_selected_item_actions(action_frame, root, display_manager, refresh_im
 
     def delete_selected_volume():
         if not check_docker_running(): return
-        rows = _selected_rows("volume", table_type='volume')
+        rows = _selected_rows("volume", table_type=_VOLUME_VIEWS)
         if not rows:
             return
         count = len(rows)
         msg = f"Delete {count} volume(s)?" if count > 1 else f"Delete volume {rows[0][1]}?"
         if confirm_action_dialog(root, "Confirm", msg):
-            _run_output_command(
+            _run_mutation(
                 DOCKER_VOLUME_RM.format(volumes=' '.join(_quote(row[1]) for row in rows)),
                 "Volume Delete",
             )
 
     def inspect_selected_volume():
         if not check_docker_running(): return
-        rows = _selected_rows("volume", table_type='volume', allow_multiple=False)
+        rows = _selected_rows("volume", table_type=_VOLUME_VIEWS, allow_multiple=False)
         if not rows:
             return
         _run_output_command(
@@ -312,7 +343,7 @@ def create_selected_item_actions(action_frame, root, display_manager, refresh_im
         count = len(rows)
         msg = f"Delete {count} network(s)?" if count > 1 else f"Delete network {_network_name(rows[0])}?"
         if confirm_action_dialog(root, "Confirm", msg):
-            _run_output_command(
+            _run_mutation(
                 DOCKER_NETWORK_RM.format(networks=' '.join(_quote(_network_name(row)) for row in rows)),
                 "Network Delete",
             )
@@ -335,7 +366,7 @@ def create_selected_item_actions(action_frame, root, display_manager, refresh_im
         container_ref = _prompt_value("Connect Network", "Container name or ID:")
         if not container_ref:
             return
-        _run_output_command(
+        _run_mutation(
             DOCKER_NETWORK_CONNECT.format(network=_quote(_network_name(rows[0])), container=_quote(container_ref)),
             "Network Connect",
         )
@@ -348,7 +379,7 @@ def create_selected_item_actions(action_frame, root, display_manager, refresh_im
         container_ref = _prompt_value("Disconnect Network", "Container name or ID:")
         if not container_ref:
             return
-        _run_output_command(
+        _run_mutation(
             DOCKER_NETWORK_DISCONNECT.format(network=_quote(_network_name(rows[0])), container=_quote(container_ref)),
             "Network Disconnect",
         )
@@ -379,7 +410,7 @@ def create_selected_item_actions(action_frame, root, display_manager, refresh_im
                     )
                     for image in images
                 )
-                _run_output_command(commands, "Container Run")
+                _run_mutation(commands, "Container Run")
             return
 
         dialog = tk.Toplevel(root)
@@ -399,10 +430,10 @@ def create_selected_item_actions(action_frame, root, display_manager, refresh_im
         ttk.Entry(dialog, textvariable=name_var, width=42).grid(row=1, column=1, sticky="ew", padx=16, pady=4)
 
         ttk.Label(dialog, text="Restart policy:", font=("Arial", 10)).grid(row=2, column=0, sticky="w", padx=16, pady=4)
-        ttk.Combobox(dialog, textvariable=restart_var, values=["unless-stopped", "always", "on-failure", "no"], state="readonly", width=20).grid(row=2, column=1, sticky="w", padx=16, pady=4)
+        ttk.Combobox(dialog, textvariable=restart_var, values=["unless-stopped", "always", "on-failure", "no"], state="readonly", width=42).grid(row=2, column=1, sticky="ew", padx=16, pady=4)
 
         ttk.Label(dialog, text="Network:", font=("Arial", 10)).grid(row=3, column=0, sticky="w", padx=16, pady=4)
-        ttk.Combobox(dialog, textvariable=network_var, values=[""] + network_names, state="readonly", width=30).grid(row=3, column=1, sticky="w", padx=16, pady=4)
+        ttk.Combobox(dialog, textvariable=network_var, values=[""] + network_names, state="readonly", width=42).grid(row=3, column=1, sticky="ew", padx=16, pady=4)
 
         ttk.Label(dialog, text="Ports (one per line, e.g. 8080:80):", font=("Arial", 10)).grid(row=4, column=0, columnspan=2, sticky="w", padx=16, pady=(8, 4))
         ports_text = tk.Text(dialog, height=3, width=50, font=("JetBrains Mono", 9))
@@ -447,7 +478,7 @@ def create_selected_item_actions(action_frame, root, display_manager, refresh_im
                 command=command_tail,
             )
             dialog.destroy()
-            _run_output_command(command, "Container Run")
+            _run_mutation(command, "Container Run")
 
         btn_frame = ttk.Frame(dialog)
         btn_frame.grid(row=11, column=0, columnspan=2, pady=(12, 16))
@@ -476,12 +507,13 @@ def create_selected_item_actions(action_frame, root, display_manager, refresh_im
         count = len(all_containers)
         msg = f"Stop {count} container(s) using selected image(s)?"
         if confirm_action_dialog(root, "Confirm", msg):
-            _run_output_command(
+            _run_mutation(
                 DOCKER_CONTAINER_STOP.format(containers=_join_quoted(all_containers)),
                 "Stop Containers Using Image",
             )
 
-    def compose_up_selected():
+    def _compose_mutation(template, title, confirm_msg=None):
+        """Run one compose command (built from `template`) for every selected project."""
         if not check_docker_running(): return
         rows = _selected_rows("compose project", table_type='compose')
         if not rows:
@@ -491,37 +523,39 @@ def create_selected_item_actions(action_frame, root, display_manager, refresh_im
             _project_name, files = _compose_project(row)
             files_arg = _compose_files_to_args(files)
             if files_arg:
-                commands.append(DOCKER_COMPOSE_UP.format(files=files_arg))
-        if commands:
-            _run_output_command(' && '.join(commands), "Compose Up")
+                commands.append(template.format(files=files_arg))
+        if not commands:
+            return
+        if confirm_msg and not confirm_action_dialog(
+                root, "Confirm", confirm_msg.format(projects=', '.join(r[1] for r in rows))):
+            return
+        _run_mutation(' && '.join(commands), title)
+
+    def compose_up_selected():
+        _compose_mutation(DOCKER_COMPOSE_UP, "Compose Up")
+
+    def compose_up_build_selected():
+        _compose_mutation(DOCKER_COMPOSE_UP_BUILD, "Compose Up --build")
+
+    def compose_build_selected():
+        _compose_mutation(DOCKER_COMPOSE_BUILD, "Compose Build")
+
+    def compose_pull_selected():
+        _compose_mutation(DOCKER_COMPOSE_PULL, "Compose Pull")
+
+    def compose_stop_selected():
+        _compose_mutation(DOCKER_COMPOSE_STOP, "Compose Stop")
 
     def compose_down_selected():
-        if not check_docker_running(): return
-        rows = _selected_rows("compose project", table_type='compose')
-        if not rows:
-            return
-        commands = []
-        for row in rows:
-            _project_name, files = _compose_project(row)
-            files_arg = _compose_files_to_args(files)
-            if files_arg:
-                commands.append(DOCKER_COMPOSE_DOWN.format(files=files_arg))
-        if commands:
-            _run_output_command(' && '.join(commands), "Compose Down")
+        _compose_mutation(DOCKER_COMPOSE_DOWN, "Compose Down")
+
+    def compose_down_volumes_selected():
+        _compose_mutation(
+            DOCKER_COMPOSE_DOWN_VOLUMES, "Compose Down + Volumes",
+            "Remove {projects} and delete its named volumes?\n\nData stored in those volumes is lost.")
 
     def compose_restart_selected():
-        if not check_docker_running(): return
-        rows = _selected_rows("compose project", table_type='compose')
-        if not rows:
-            return
-        commands = []
-        for row in rows:
-            _project_name, files = _compose_project(row)
-            files_arg = _compose_files_to_args(files)
-            if files_arg:
-                commands.append(DOCKER_COMPOSE_RESTART.format(files=files_arg))
-        if commands:
-            _run_output_command(' && '.join(commands), "Compose Restart")
+        _compose_mutation(DOCKER_COMPOSE_RESTART, "Compose Restart")
 
     def compose_logs_selected():
         if not check_docker_running(): return
@@ -739,6 +773,31 @@ def create_selected_item_actions(action_frame, root, display_manager, refresh_im
                                 command=compose_up_selected)
     Tooltip(btn_compose_up, ACTION_TOOLTIPS["compose_up"])
 
+    btn_compose_up_build = ttk.Button(action_frame, text="🔨 Up --build",
+                                      style="success.Outline.TButton",
+                                      command=compose_up_build_selected)
+    Tooltip(btn_compose_up_build, ACTION_TOOLTIPS["compose_up_build"])
+
+    btn_compose_build = ttk.Button(action_frame, text="🏗 Compose Build",
+                                   style="info.Outline.TButton",
+                                   command=compose_build_selected)
+    Tooltip(btn_compose_build, ACTION_TOOLTIPS["compose_build"])
+
+    btn_compose_pull = ttk.Button(action_frame, text="⬇ Compose Pull",
+                                  style="info.Outline.TButton",
+                                  command=compose_pull_selected)
+    Tooltip(btn_compose_pull, ACTION_TOOLTIPS["compose_pull"])
+
+    btn_compose_stop = ttk.Button(action_frame, text="⏸ Compose Stop",
+                                  style="warning.Outline.TButton",
+                                  command=compose_stop_selected)
+    Tooltip(btn_compose_stop, ACTION_TOOLTIPS["compose_stop"])
+
+    btn_compose_down_volumes = ttk.Button(action_frame, text="🗑 Down + Volumes",
+                                          style="danger.Outline.TButton",
+                                          command=compose_down_volumes_selected)
+    Tooltip(btn_compose_down_volumes, ACTION_TOOLTIPS["compose_down_volumes"])
+
     btn_compose_down = ttk.Button(action_frame, text="⏹ Compose Down",
                                   style="danger.Outline.TButton",
                                   command=compose_down_selected)
@@ -792,7 +851,12 @@ def create_selected_item_actions(action_frame, root, display_manager, refresh_im
         'connect_network': btn_connect_network,
         'disconnect_network': btn_disconnect_network,
         'compose_up': btn_compose_up,
+        'compose_up_build': btn_compose_up_build,
+        'compose_build': btn_compose_build,
+        'compose_pull': btn_compose_pull,
+        'compose_stop': btn_compose_stop,
         'compose_down': btn_compose_down,
+        'compose_down_volumes': btn_compose_down_volumes,
         'compose_restart': btn_compose_restart,
         'compose_logs': btn_compose_logs,
         'compose_services': btn_compose_services,

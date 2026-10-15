@@ -41,7 +41,7 @@ from src.help.help_creator import (
     CREATOR_ROLE,
 )
 from src.help.help_info import help_info
-from src.config.config_menu import get_menu_structure
+from src.config.config_menu import get_menu_structure, VIEW_BUTTONS
 
 # Import utility modules
 from src.utils.utils import check_docker_installed, is_docker_running, check_terminal_installed
@@ -56,6 +56,7 @@ from src.ui.ui_components import (
 
 from src.ui.ui_display import DisplayManager
 from src.ui.terminal_panel import TerminalPanel
+from src.ui.rounded import apply_rounded_styles, RoundedPanel, make, readable
 from src.ui.keyboard_navigation import (
     setup_keyboard_navigation,
     enable_button_enter_key,
@@ -190,6 +191,7 @@ class DockerGUI:
             "warning.Outline.TButton", "info.Outline.TButton",
         ):
             self.style.configure(style_name, padding=(6, 2))
+        apply_rounded_styles(self.style, self.root)
     
     def _configure_treeview_grid(self, theme):
         """Apply cell-border / grid-line styling to the Treeview widget."""
@@ -238,11 +240,12 @@ class DockerGUI:
         sidebar = self.sidebar
         
         # App title in sidebar
-        tk.Label(
+        self.sidebar_title_label = tk.Label(
             sidebar, text="🐳 Docker Control Panel",
             bg=theme["sidebar_bg"], fg="#4ea8f7",
             font=("Arial", 10, "bold")
-        ).pack(pady=(14, 2), padx=14, anchor=tk.W)
+        )
+        self.sidebar_title_label.pack(pady=(14, 2), padx=14, anchor=tk.W)
 
         # Docker status badge
         self.sidebar_status_label = tk.Label(
@@ -252,6 +255,7 @@ class DockerGUI:
             font=("Arial", 8),
         )
         self.sidebar_status_label.pack(padx=14, pady=(0, 6), anchor=tk.W)
+        self._apply_sidebar_text_colors(theme)
 
         # Thin separator line
         tk.Frame(sidebar, bg="#333355", height=1).pack(fill=tk.X, padx=14, pady=(0, 8))
@@ -318,7 +322,7 @@ class DockerGUI:
                 self.show_loading,
             ),
             lambda: show_containers_with_stats(self.display_manager.show_table, self.show_loading, self.display_manager),
-            lambda: docker_disk_usage_view(self.display_manager.output_container, self.show_loading),
+            lambda: docker_disk_usage_view(self.display_manager, self.show_loading),
             lambda: show_docker_disk_storage_simple(self.display_manager.show_table, self.show_loading)
         )
         
@@ -383,6 +387,12 @@ class DockerGUI:
         # Password management and status at bottom
         self.create_sidebar_bottom(sidebar)
     
+    def _apply_sidebar_text_colors(self, theme):
+        """Title and status text keep their hue but are adjusted to be legible on this sidebar."""
+        bg = theme["sidebar_bg"]
+        self.sidebar_title_label.configure(fg=readable("#4ea8f7", bg))
+        self.sidebar_status_label.configure(fg=readable("#888888", bg))
+
     def create_theme_selector(self, parent):
         """Create theme selector"""
         theme_frame = ttk.Frame(parent)
@@ -442,6 +452,11 @@ class DockerGUI:
         # Docker info panel (shown only when Docker category is active)
         self._docker_info_panel = self._create_docker_info_panel(main_frame)
 
+        # Status bar: result of the last action (packed before the content so it stays visible)
+        self.status_label = ttk.Label(main_frame, text="Ready", style="secondary.TLabel",
+                                      font=("Arial", 9), anchor=tk.W)
+        self.status_label.pack(side=tk.BOTTOM, fill=tk.X, pady=(4, 0))
+
         # Content area with output and help
         content_area = ttk.Frame(main_frame)
         content_area.pack(fill=tk.BOTH, expand=True)
@@ -470,39 +485,34 @@ class DockerGUI:
 
         # Setup context menus
         setup_text_context_menu(text_widget, self.root)
-        setup_table_context_menu(table_widget, self.root)
+        setup_table_context_menu(self.display_manager, self.root)
     
     def _create_docker_info_panel(self, parent):
         """Create app-description banner shown below the toolbar when Docker is active."""
-        panel = tk.Frame(parent, bg="#0d1117", relief="flat", bd=0)
+        BG = "#0d1117"
+        panel = RoundedPanel(parent, BG, radius=12, padding=2)
+        body = panel.body
 
         # Left column: whale + title + tagline
-        left = tk.Frame(panel, bg="#0d1117")
+        left = make(tk.Frame, body, bg=BG)
         left.pack(side=tk.LEFT, padx=(14, 24), pady=10)
 
-        tk.Label(
-            left, text="🐳  Docker Control Panel",
-            font=("JetBrains Mono", 12, "bold"),
-            bg="#0d1117", fg="#4ea8f7",
-        ).pack(anchor=tk.W)
-        tk.Label(
-            left, text="A graphical Docker manager for Linux",
-            font=("Arial", 9), bg="#0d1117", fg="#6e7f92",
-        ).pack(anchor=tk.W, pady=(2, 0))
+        make(tk.Label, left, text="🐳  Docker Control Panel",
+             font=("JetBrains Mono", 12, "bold"), bg=BG, fg="#4ea8f7").pack(anchor=tk.W)
+        make(tk.Label, left, text="A graphical Docker manager for Linux",
+             font=("Arial", 9), bg=BG, fg="#6e7f92").pack(anchor=tk.W, pady=(2, 0))
 
         # Vertical divider
-        tk.Frame(panel, bg="#1e2d3d", width=1).pack(side=tk.LEFT, fill=tk.Y, pady=6)
+        make(tk.Frame, body, bg="#1e2d3d", width=1).pack(side=tk.LEFT, fill=tk.Y, pady=6)
 
         # Centre column: feature chips
-        centre = tk.Frame(panel, bg="#0d1117")
+        centre = make(tk.Frame, body, bg=BG)
         centre.pack(side=tk.LEFT, padx=20, pady=10)
 
-        tk.Label(
-            centre, text="Features",
-            font=("Arial", 8, "bold"), bg="#0d1117", fg="#6e7f92",
-        ).pack(anchor=tk.W)
+        make(tk.Label, centre, text="Features",
+             font=("Arial", 8, "bold"), bg=BG, fg="#6e7f92").pack(anchor=tk.W)
 
-        chips_row = tk.Frame(centre, bg="#0d1117")
+        chips_row = make(tk.Frame, centre, bg=BG)
         chips_row.pack(anchor=tk.W, pady=(4, 0))
 
         _FEATURES = [
@@ -513,25 +523,20 @@ class DockerGUI:
             ("🧩 Compose",     "#1a3a4a"),
             ("📊 Stats",       "#4a1a1a"),
         ]
-        for label, bg in _FEATURES:
-            tk.Label(
-                chips_row, text=f" {label} ",
-                font=("Arial", 8, "bold"),
-                bg=bg, fg="#c0d8f0",
-                relief="flat", padx=4, pady=3,
-            ).pack(side=tk.LEFT, padx=(0, 6))
+        for label, chip_bg in _FEATURES:
+            make(tk.Label, chips_row, text=f" {label} ",
+                 font=("Arial", 8, "bold"), bg=chip_bg, fg="#c0d8f0",
+                 relief="flat", padx=4, pady=3).pack(side=tk.LEFT, padx=(0, 6))
 
         # Vertical divider
-        tk.Frame(panel, bg="#1e2d3d", width=1).pack(side=tk.LEFT, fill=tk.Y, pady=6)
+        make(tk.Frame, body, bg="#1e2d3d", width=1).pack(side=tk.LEFT, fill=tk.Y, pady=6)
 
         # Right column: quick tips
-        right = tk.Frame(panel, bg="#0d1117")
+        right = make(tk.Frame, body, bg=BG)
         right.pack(side=tk.LEFT, padx=20, pady=10)
 
-        tk.Label(
-            right, text="Quick Tips",
-            font=("Arial", 8, "bold"), bg="#0d1117", fg="#6e7f92",
-        ).pack(anchor=tk.W)
+        make(tk.Label, right, text="Quick Tips",
+             font=("Arial", 8, "bold"), bg=BG, fg="#6e7f92").pack(anchor=tk.W)
 
         _TIPS = [
             "• Click a sidebar category to explore Docker resources",
@@ -539,11 +544,8 @@ class DockerGUI:
             "• Right-click any table row for a context menu",
         ]
         for tip in _TIPS:
-            tk.Label(
-                right, text=tip,
-                font=("Arial", 8), bg="#0d1117", fg="#8a9fb5",
-                anchor=tk.W, justify=tk.LEFT,
-            ).pack(anchor=tk.W, pady=1)
+            make(tk.Label, right, text=tip, font=("Arial", 8), bg=BG, fg="#8a9fb5",
+                 anchor=tk.W, justify=tk.LEFT).pack(anchor=tk.W, pady=1)
 
         # Panel starts hidden; show_category_buttons controls visibility
         return panel
@@ -798,6 +800,7 @@ class DockerGUI:
             self.show_loading,
         )
         self.display_manager.set_action_buttons(action_buttons, action_label)
+        self.display_manager.status_label = self.status_label
     
     def setup_keyboard_nav(self):
         """Setup keyboard navigation"""
@@ -827,20 +830,20 @@ class DockerGUI:
         self._spinner_frame_idx = 0
         self._spinner_job = None
 
-        overlay = tk.Frame(
-            self.display_manager.output_container,
-            bg='#1c2333', relief='groove', bd=2
+        overlay = RoundedPanel(
+            self.display_manager.output_container, '#1c2333',
+            radius=16, outline='#2f3b52', padding=2, fit_width=True,
         )
         overlay.place(relx=0.5, rely=0.5, anchor='center')
 
-        self._spinner_lbl = tk.Label(
-            overlay, text=self._SPINNER_FRAMES[0],
+        self._spinner_lbl = make(
+            tk.Label, overlay.body, text=self._SPINNER_FRAMES[0],
             font=('JetBrains Mono', 32), bg='#1c2333', fg='#4ea8f7'
         )
         self._spinner_lbl.pack(padx=40, pady=(20, 6))
 
-        tk.Label(
-            overlay, text='Loading…',
+        make(
+            tk.Label, overlay.body, text='Loading…',
             font=('Arial', 11), bg='#1c2333', fg='#9ab0cc'
         ).pack(padx=40, pady=(0, 20))
 
@@ -907,6 +910,8 @@ class DockerGUI:
                 )
         if hasattr(self, 'sidebar_status_label') and self.sidebar_status_label.winfo_exists():
             self.sidebar_status_label.configure(bg=theme["sidebar_bg"])
+            self.sidebar_title_label.configure(bg=theme["sidebar_bg"])
+            self._apply_sidebar_text_colors(theme)
         
         self.display_manager.text_widget.configure(
             bg=theme["text_bg"], fg=theme["text_fg"],
@@ -936,6 +941,9 @@ class DockerGUI:
         
         # Reapply cell-border / grid-line treeview styling for new theme
         self._configure_treeview_grid(theme)
+
+        # Rounded corners belong to the theme's styles, so they are rebuilt for the new theme
+        apply_rounded_styles(self.style, self.root)
         
         # Reapply active button highlights using the new theme's style
         if self.active_button and self.active_button.winfo_exists():
@@ -982,6 +990,8 @@ class DockerGUI:
         
         # Reset state
         self.display_manager.current_table_type = None
+        self.display_manager.view_refresh = None
+        self.display_manager.set_status("Ready")
         self.active_button = None
         self.category_buttons = {}
         self.display_manager.update_action_buttons()
@@ -1042,6 +1052,10 @@ class DockerGUI:
                         btn.configure(style='primary.TButton')
                         self.active_button = btn
                     
+                    # Remember list-switching buttons so row actions can reload the list
+                    if btn_text in VIEW_BUTTONS.get(category, ()):
+                        self.display_manager.view_refresh = command
+
                     # Execute command
                     if command:
                         command()
@@ -1071,6 +1085,8 @@ class DockerGUI:
             if i == 0 and cmd and category not in ["Docker"]:
                 btn.configure(style='primary.TButton')
                 self.active_button = btn
+                if text in VIEW_BUTTONS.get(category, ()):
+                    self.display_manager.view_refresh = cmd
                 cmd()
         
         for i in range(max_cols):

@@ -2,126 +2,62 @@
 Stats dialogs: docker disk usage view.
 """
 
-import tkinter as tk
-from tkinter import ttk
-
 from src.docker.actions import check_docker_running
 from src.config.config_manager import get_sudo_password
 from src.utils.utils import async_run, parse_fixed_width_table
-from src.ui.ui_components import create_table_widget
 from src.docker.commands import DOCKER_DISK_USAGE_VERBOSE
 
+# (tab label, heading `docker system df -v` prints above the section, table type)
+_SECTIONS = (
+    ("Images", "Images space usage", "disk_images"),
+    ("Containers", "Containers space usage", "disk_containers"),
+    ("Volumes", "Local Volumes space usage", "disk_volumes"),
+    ("Build Cache", "Build cache usage", "disk_cache"),
+)
 
-def docker_disk_usage_view(output_container, loading_callback):
-    """Show Docker disk usage in tabbed view"""
+# Tab the user was last looking at, so reloading the view (e.g. after deleting a row) stays on it
+_active_tab = {"label": _SECTIONS[0][0]}
+
+
+def _parse_sections(result):
+    """Split `docker system df -v` output into {tab label: (columns, rows)}."""
+    sections = {}
+    lines = result.splitlines()
+    i = 0
+    while i < len(lines):
+        section = next((s for s in _SECTIONS if lines[i].startswith(s[1])), None)
+        if section and i + 2 < len(lines):
+            header = lines[i + 2]
+            data = []
+            i += 3
+            while i < len(lines) and lines[i].strip():
+                data.append(lines[i])
+                i += 1
+            sections[section[0]] = parse_fixed_width_table(data, header)
+        i += 1
+    return sections
+
+
+def docker_disk_usage_view(display_manager, loading_callback):
+    """Show Docker disk usage: one table per section (images, containers, volumes, build cache),
+    switched with a tab strip, each with the usual search, sort and row actions."""
     if not check_docker_running(): return
 
     def callback(result):
-        for widget in output_container.winfo_children():
-            widget.pack_forget()
+        sections = _parse_sections(result)
+        if not sections:
+            display_manager.show_text_output(f"Docker Disk Usage\n\n{result}".strip())
+            return
 
-        disk_usage_frame = ttk.Frame(output_container)
-        disk_usage_frame.pack(fill=tk.BOTH, expand=True)
+        def show(label):
+            _active_tab["label"] = label
+            columns, rows = sections[label]
+            table_type = next(s[2] for s in _SECTIONS if s[0] == label)
+            display_manager.show_table(
+                columns, rows, table_type, f"Docker Disk Usage — {label}",
+                tabs={name: (lambda name=name: show(name)) for name in sections}, active_tab=label)
 
-        search_frame = ttk.Frame(disk_usage_frame)
-        search_frame.pack(fill=tk.X, padx=10, pady=(10, 5))
-
-        search_label = ttk.Label(search_frame, text="🔍 Search:", font=("Arial", 10))
-        search_label.pack(side=tk.LEFT, padx=(0, 5))
-
-        disk_search_entry = ttk.Entry(search_frame, font=("Arial", 10))
-        disk_search_entry.pack(side=tk.LEFT, fill=tk.X, expand=True)
-
-        disk_tables_data = []
-
-        def perform_disk_search(*args):
-            query = disk_search_entry.get().lower().strip()
-
-            for table_widget, original_rows, columns in disk_tables_data:
-                for item in table_widget.get_children():
-                    table_widget.delete(item)
-
-                for row in original_rows:
-                    row_text = ' '.join(str(val).lower() for val in row)
-                    if query == '' or query in row_text:
-                        table_widget.insert("", tk.END, values=row)
-
-        disk_search_entry.bind('<KeyRelease>', perform_disk_search)
-
-        notebook = ttk.Notebook(disk_usage_frame)
-        notebook.pack(fill=tk.BOTH, expand=True)
-
-        lines = result.splitlines()
-        i = 0
-
-        while i < len(lines):
-            line = lines[i]
-
-            if line.startswith("Images space usage"):
-                header = lines[i + 2]
-                data = []
-                i += 3
-                while i < len(lines) and lines[i].strip():
-                    data.append(lines[i])
-                    i += 1
-
-                cols, rows = parse_fixed_width_table(data, header)
-                tab = ttk.Frame(notebook)
-                notebook.add(tab, text="Images")
-                table = create_table_widget(tab, cols)
-                for r in rows:
-                    table.insert("", tk.END, values=r)
-                disk_tables_data.append((table, rows, cols))
-
-            elif line.startswith("Containers space usage"):
-                header = lines[i + 2]
-                data = []
-                i += 3
-                while i < len(lines) and lines[i].strip():
-                    data.append(lines[i])
-                    i += 1
-
-                cols, rows = parse_fixed_width_table(data, header)
-                tab = ttk.Frame(notebook)
-                notebook.add(tab, text="Containers")
-                table = create_table_widget(tab, cols)
-                for r in rows:
-                    table.insert("", tk.END, values=r)
-                disk_tables_data.append((table, rows, cols))
-
-            elif line.startswith("Local Volumes space usage"):
-                header = lines[i + 2]
-                data = []
-                i += 3
-                while i < len(lines) and lines[i].strip():
-                    data.append(lines[i])
-                    i += 1
-
-                cols, rows = parse_fixed_width_table(data, header)
-                tab = ttk.Frame(notebook)
-                notebook.add(tab, text="Volumes")
-                table = create_table_widget(tab, cols)
-                for r in rows:
-                    table.insert("", tk.END, values=r)
-                disk_tables_data.append((table, rows, cols))
-
-            elif line.startswith("Build cache usage"):
-                header = lines[i + 2]
-                data = []
-                i += 3
-                while i < len(lines) and lines[i].strip():
-                    data.append(lines[i])
-                    i += 1
-
-                cols, rows = parse_fixed_width_table(data, header)
-                tab = ttk.Frame(notebook)
-                notebook.add(tab, text="Build Cache")
-                table = create_table_widget(tab, cols)
-                for r in rows:
-                    table.insert("", tk.END, values=r)
-                disk_tables_data.append((table, rows, cols))
-
-            i += 1
+        show(_active_tab["label"] if _active_tab["label"] in sections else next(iter(sections)))
 
     async_run(DOCKER_DISK_USAGE_VERBOSE, callback, sudo=True, sudo_password=get_sudo_password(),
-             loading_callback=loading_callback)
+              loading_callback=loading_callback)

@@ -52,7 +52,7 @@ def show_containers_with_stats(show_table_callback, show_loading_callback, displ
     if not running:
         show_table_callback(
             ["CONTAINER ID", "NAME", "CPU %", "MEM USAGE", "MEM %", "NET I/O", "BLOCK I/O", "PIDs"],
-            [], 'container_stats', "Container Stats", False
+            [], 'container_stats', "Container Stats (Running Containers Only)", False
         )
         if display_manager and display_manager.live_stats_enabled:
             display_manager.live_stats_job = display_manager.output_container.after(

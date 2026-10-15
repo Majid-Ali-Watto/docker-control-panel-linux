@@ -48,6 +48,8 @@ from src.docker.commands import (
     # Compose actions
     DOCKER_COMPOSE_PS, DOCKER_COMPOSE_UP, DOCKER_COMPOSE_DOWN,
     DOCKER_COMPOSE_RESTART, DOCKER_COMPOSE_LOGS, DOCKER_COMPOSE_CONFIG,
+    DOCKER_COMPOSE_UP_BUILD, DOCKER_COMPOSE_BUILD, DOCKER_COMPOSE_PULL, DOCKER_COMPOSE_STOP,
+    DOCKER_COMPOSE_DOWN_VOLUMES,
     # Inspect / run
     DOCKER_INSPECT_IMAGE, DOCKER_INSPECT_MOUNTS, DOCKER_INSPECT_ANCESTOR,
     DOCKER_PULL, DOCKER_SEARCH, DOCKER_RUN_DETACHED,
@@ -467,6 +469,7 @@ _FAKE_COMPOSE_JSON = (
 
 class TestComposeButtons(_Base):
 
+    @patch('src.compose.tables.load_compose_projects', return_value=[])
     @patch('src.compose.tables.check_docker_running', return_value=True)
     @patch('src.utils.utils.startThreadForTask', side_effect=_sync_thread)
     @patch('src.compose.tables.get_sudo_password', return_value=FAKE_PW)
@@ -481,6 +484,7 @@ class TestComposeButtons(_Base):
         self.assertEqual(len(calls[0]['rows']), 1)
         self.assertEqual(calls[0]['rows'][0][0], 'myapp')
 
+    @patch('src.compose.tables.load_compose_projects', return_value=[])
     @patch('src.compose.tables.check_docker_running', return_value=True)
     @patch('src.utils.utils.startThreadForTask', side_effect=_sync_thread)
     @patch('src.compose.tables.get_sudo_password', return_value=FAKE_PW)
@@ -492,6 +496,79 @@ class TestComposeButtons(_Base):
             show_compose_projects(cb, self.show_loading)
         self.assertTrue(calls)
         self.assertEqual(calls[0]['rows'], [])
+
+
+class TestComposeRetainedProjects(_Base):
+
+    def _rows(self, saved, listed_json):
+        cb, calls = _table_cb()
+        from src.compose.tables import show_compose_projects
+        with patch('src.compose.tables.check_docker_running', return_value=True), \
+             patch('src.compose.tables.get_sudo_password', return_value=FAKE_PW), \
+             patch('src.compose.tables.load_compose_projects', return_value=saved), \
+             patch('src.compose.tables.async_run', side_effect=lambda *a, **_: a[1](listed_json)):
+            show_compose_projects(cb, self.show_loading)
+        return calls[0]['rows']
+
+    def test_saved_project_listed_when_not_running(self):
+        import os, tempfile
+        with tempfile.TemporaryDirectory(prefix='My App') as d:
+            f = os.path.join(d, 'docker-compose.yml')
+            open(f, 'w').close()
+            rows = self._rows([[f]], '[]')
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0][1:], ['not running', f])
+
+    def test_saved_project_not_duplicated_when_running(self):
+        import os, tempfile
+        with tempfile.TemporaryDirectory() as d:
+            f = os.path.join(d, 'docker-compose.yml')
+            open(f, 'w').close()
+            rows = self._rows([[f]], '[{"Name":"x","Status":"running(1)","ConfigFiles":"%s"}]' % f)
+        self.assertEqual([r[0] for r in rows], ['x'])
+
+    def test_saved_project_with_missing_files_hidden(self):
+        self.assertEqual(self._rows([['/no/such/dir/docker-compose.yml']], '[]'), [])
+
+    def test_config_round_trip_moves_repeat_to_end(self):
+        import tempfile
+        from pathlib import Path
+        from src.config import config_manager as cm
+        with tempfile.TemporaryDirectory() as d, \
+             patch.object(cm, 'CONFIG_DIR', Path(d)), patch.object(cm, 'CONFIG_FILE', Path(d) / 'config.json'):
+            cm.save_compose_project(['/a/compose.yml'])
+            cm.save_compose_project(['/b/compose.yml', '/b/compose.override.yml'])
+            cm.save_compose_project(['/a/compose.yml'])
+            self.assertEqual(cm.load_compose_projects(),
+                             [['/b/compose.yml', '/b/compose.override.yml'], ['/a/compose.yml']])
+
+
+class TestComposeFolderSelection(unittest.TestCase):
+
+    def _folder(self, names):
+        import os, tempfile
+        d = tempfile.TemporaryDirectory()
+        self.addCleanup(d.cleanup)
+        for n in names:
+            open(os.path.join(d.name, n), 'w').close()
+        return d.name
+
+    def test_picks_default_file_and_matching_override(self):
+        import os
+        from src.compose.dialogs import _compose_files_in_folder
+        d = self._folder(['docker-compose.yml', 'docker-compose.override.yml', 'compose.override.yaml'])
+        self.assertEqual(_compose_files_in_folder(d),
+                         [os.path.join(d, 'docker-compose.yml'), os.path.join(d, 'docker-compose.override.yml')])
+
+    def test_compose_yaml_takes_precedence(self):
+        import os
+        from src.compose.dialogs import _compose_files_in_folder
+        d = self._folder(['docker-compose.yml', 'compose.yaml'])
+        self.assertEqual(_compose_files_in_folder(d), [os.path.join(d, 'compose.yaml')])
+
+    def test_folder_without_compose_file(self):
+        from src.compose.dialogs import _compose_files_in_folder
+        self.assertEqual(_compose_files_in_folder(self._folder(['README.md'])), [])
 
 
 # ===========================================================================
@@ -1148,6 +1225,31 @@ class TestSelectedItemActions(_Base):
             cmd,
         )
 
+    def _compose_cmd(self, button):
+        with patch('src.shared.item_actions.run_docker_cmd') as mock_run:
+            self._build(self._dm('compose', _F_COMPOSE))[button].invoke()
+        return mock_run.call_args[0][0] if mock_run.called else None
+
+    def test_compose_up_build_build_pull_stop(self):
+        files = '-f /app/docker-compose.yml'
+        for button, template in (('compose_up_build', DOCKER_COMPOSE_UP_BUILD),
+                                 ('compose_build', DOCKER_COMPOSE_BUILD),
+                                 ('compose_pull', DOCKER_COMPOSE_PULL),
+                                 ('compose_stop', DOCKER_COMPOSE_STOP)):
+            self.assertEqual(self._compose_cmd(button), template.format(files=files), button)
+        self.assertIn('up -d --build', DOCKER_COMPOSE_UP_BUILD)
+
+    @patch('src.shared.item_actions.confirm_action_dialog', return_value=True)
+    def test_compose_down_volumes_confirmed(self, mock_confirm):
+        cmd = self._compose_cmd('compose_down_volumes')
+        self.assertEqual(cmd, DOCKER_COMPOSE_DOWN_VOLUMES.format(files='-f /app/docker-compose.yml'))
+        self.assertIn('down -v', cmd)
+        mock_confirm.assert_called_once()
+
+    @patch('src.shared.item_actions.confirm_action_dialog', return_value=False)
+    def test_compose_down_volumes_declined_runs_nothing(self, _):
+        self.assertIsNone(self._compose_cmd('compose_down_volumes'))
+
     @patch('src.shared.item_actions.run_docker_cmd')
     def test_compose_logs(self, mock_run):
         btns = self._build(self._dm('compose', _F_COMPOSE))
@@ -1352,6 +1454,804 @@ class TestDialogCommandFormats(unittest.TestCase):
 
     def test_images_ids_all_defined(self):
         self.assertIn('docker images', DOCKER_IMAGES_IDS_ALL)
+
+
+# ===========================================================================
+# 16. Table usability  (sorting, search, selection-aware buttons, in-place refresh)
+# ===========================================================================
+
+class _TableFixture(_Base):
+    """A DisplayManager wired to a real Treeview and the real row-action buttons."""
+    COLS = ["CONTAINER ID", "NAMES", "IMAGE", "STATUS", "PORTS", "SIZE"]
+    ROWS = [["c1", "web", "nginx", "Up 2 hours", "80/tcp", "1B"],
+            ["c2", "db", "pg", "Exited (0) 3 days ago", "", "2B"],
+            ["c3", "cache", "redis", "Up 1 hour (Paused)", "", "3B"]]
+
+    def setUp(self):
+        super().setUp()
+        from src.ui.ui_display import DisplayManager
+        from src.shared.item_actions import create_selected_item_actions
+        out = ttk.Frame(self.root)
+        table_frame = ttk.Frame(out)
+        self.tree = ttk.Treeview(table_frame)
+        self.tree.pack()
+        action_frame = ttk.Frame(table_frame)
+        text_frame = ttk.Frame(out)
+        self.dm = DisplayManager(out, table_frame, text_frame, self.tree, tk.Text(text_frame), action_frame)
+        self.btns, label = create_selected_item_actions(action_frame, self.root, self.dm, MagicMock(), MagicMock())
+        self.dm.set_action_buttons(self.btns, label)
+        self.dm.show_table(self.COLS, self.ROWS, 'container', "All Containers")
+
+    def _names(self):
+        return [self.tree.item(i)['values'][2] for i in self.tree.get_children()]
+
+
+_FAKE_DF_VERBOSE = '''Images space usage:
+
+REPOSITORY   TAG       IMAGE ID       CREATED        SIZE      SHARED SIZE   UNIQUE SIZE   CONTAINERS
+nginx        latest    abc123def456   2 weeks ago    187MB     0B            187MB         1
+redis        7         fff000fff000   About an hour ago   20MB   0B           20MB          0
+
+Containers space usage:
+
+CONTAINER ID   IMAGE     COMMAND                  LOCAL VOLUMES   SIZE      CREATED       STATUS       NAMES
+c1c1c1c1c1c1   nginx     "/docker-entrypoint.\u2026"   0               1.09kB    2 weeks ago   Up 2 weeks   web
+
+Local Volumes space usage:
+
+VOLUME NAME   LINKS     SIZE
+data          1         10MB
+
+Build cache usage: 0B
+
+CACHE ID   CACHE TYPE   SIZE      CREATED   LAST USED   USAGE     SHARED
+'''
+
+
+class TestDiskUsageView(_TableFixture):
+
+    def _open(self):
+        from src.stats import dialogs
+        with patch('src.stats.dialogs.check_docker_running', return_value=True), \
+             patch('src.stats.dialogs.async_run', side_effect=lambda *a, **_: a[1](_FAKE_DF_VERBOSE)):
+            dialogs.docker_disk_usage_view(self.dm, MagicMock())
+
+    def test_parses_all_four_sections(self):
+        from src.stats.dialogs import _parse_sections
+        sections = _parse_sections(_FAKE_DF_VERBOSE)
+        self.assertEqual(list(sections), ["Images", "Containers", "Volumes", "Build Cache"])
+        self.assertEqual(len(sections["Images"][1]), 2)
+        self.assertEqual(sections["Volumes"][1], [["data", "1", "10MB"]])
+        self.assertEqual(sections["Build Cache"][1], [])
+
+    def test_each_tab_is_a_searchable_sortable_table_with_actions(self):
+        self._open()
+        self.assertEqual(self.dm.current_table_type, 'disk_images')
+        self.assertIsNotNone(self.dm.search_entry)
+        self.dm.sort_by(4)   # SIZE: 20MB before 187MB
+        self.assertEqual([self.tree.item(i)['values'][1] for i in self.tree.get_children()], ["redis", "nginx"])
+        self.assertEqual([n for n, _ in self.dm._visible_action_buttons],
+                         ['delete_image', 'inspect_image', 'history_image'])
+
+    def test_switching_tabs_keeps_choice_across_reload(self):
+        self._open()
+        strip = self.dm._chrome[0].winfo_children()[0]
+        next(b for b in strip.winfo_children() if b.cget('text') == 'Volumes').invoke()
+        self.assertEqual(self.dm.current_table_type, 'disk_volumes')
+        self.assertEqual(self.tree.item(self.tree.get_children()[0])['values'][1], 'data')
+        self._open()   # reload (e.g. after a delete) stays on Volumes
+        self.assertEqual(self.dm.current_table_type, 'disk_volumes')
+
+    def test_image_delete_works_from_images_tab(self):
+        from src.stats import dialogs
+        dialogs._active_tab["label"] = "Images"
+        self._open()
+        self.tree.selection_set('0')
+        self.dm.update_selection_state()
+        with patch('src.shared.item_actions.run_docker_cmd') as mock_run, \
+             patch('src.shared.item_actions.check_docker_running', return_value=True), \
+             patch('src.shared.item_actions.confirm_action_dialog', return_value=True):
+            self.btns['delete_image'].invoke()
+        self.assertIn('abc123def456', mock_run.call_args[0][0])
+
+    def test_relative_ages_sort_by_age(self):
+        self.dm._sort_col = 0
+        ages = ["2 weeks ago", "About an hour ago", "3 days ago", "10 minutes ago"]
+        ordered = sorted(ages, key=lambda a: self.dm._sort_key([a]))   # oldest first
+        self.assertEqual(ordered, ["2 weeks ago", "3 days ago", "About an hour ago", "10 minutes ago"])
+
+
+class TestTableUsability(_TableFixture):
+
+    def test_stats_tables_get_search_and_sort(self):
+        cols = ["CONTAINER ID", "NAME", "CPU %", "MEM USAGE"]
+        rows = [["a", "web", "5.00%", "10MiB / 1GiB"], ["b", "db", "20.00%", "2MiB / 1GiB"]]
+        self.dm.show_table(cols, rows, 'container_stats', "Container Stats")
+        self.assertIsNotNone(self.dm.search_entry)
+        self.dm.sort_by(2)
+        self.dm.sort_by(2)   # second click: descending
+        self.assertEqual([self.tree.item(i)['values'][2] for i in self.tree.get_children()], ["db", "web"])
+        self.dm.search_entry.insert(0, "web")
+        self.dm.perform_search()
+        self.assertEqual(len(self.tree.get_children()), 1)
+
+    def test_reload_of_same_view_keeps_search_box(self):
+        cols = ["CONTAINER ID", "NAME"]
+        self.dm.show_table(cols, [["a", "web"]], 'container_stats', "Container Stats")
+        entry = self.dm.search_entry
+        entry.insert(0, "we")
+        self.dm.show_table(cols, [["a", "web"], ["b", "db"]], 'container_stats', "Container Stats")
+        self.assertIs(self.dm.search_entry, entry)
+        self.assertEqual(entry.get(), "we")
+        self.assertEqual(len(self.tree.get_children()), 1)
+
+    def test_actions_disabled_until_rows_selected(self):
+        self.assertTrue(self.btns['start'].instate(['disabled']))
+        self.tree.selection_set('0')
+        self.dm.update_selection_state()
+        self.assertFalse(self.btns['start'].instate(['disabled']))
+
+    def test_single_row_actions_disabled_for_multi_select(self):
+        self.tree.selection_set('0', '1')
+        self.dm.update_selection_state()
+        self.assertFalse(self.btns['start'].instate(['disabled']))
+        self.assertTrue(self.btns['rename'].instate(['disabled']))
+
+    def test_sort_toggles_direction(self):
+        self.dm.sort_by(1)
+        self.assertEqual(self._names(), ['cache', 'db', 'web'])
+        self.dm.sort_by(1)
+        self.assertEqual(self._names(), ['web', 'db', 'cache'])
+
+    def test_search_filters_rows(self):
+        self.dm.search_entry.insert(0, 'redis')
+        self.dm.perform_search()
+        self.assertEqual(self._names(), ['cache'])
+
+    def test_reload_keeps_search_and_selection(self):
+        self.dm.search_entry.insert(0, 'e')
+        self.dm.perform_search()
+        self.tree.selection_set(self.tree.get_children()[0])
+        self.dm.show_table(self.COLS, self.ROWS, 'container', "All Containers")
+        self.assertEqual(self.dm.search_entry.get(), 'e')
+        self.assertEqual(len(self.tree.selection()), 1)
+
+    def test_rows_use_only_alternating_stripe_tags(self):
+        tags = {tag for i in self.tree.get_children() for tag in self.tree.item(i)['tags']}
+        self.assertEqual(tags, {'oddrow', 'evenrow'})
+
+    def test_text_output_offers_back_to_list(self):
+        self.dm.view_refresh = MagicMock()
+        self.dm.show_text_output("details")
+        self.assertTrue(self.dm._back_bar.winfo_manager())
+        self.dm.refresh_view()
+        self.dm.view_refresh.assert_called_once()
+
+
+class TestDateFilterAndSort(_TableFixture):
+    """Tables with a CREATED column get a date/time filter and a sort dropdown."""
+    COLS = ["CONTAINER ID", "NAMES", "STATUS", "CREATED"]
+
+    def setUp(self):
+        from datetime import datetime, timedelta
+        now = datetime.now()
+        fmt = lambda d: d.strftime("%Y-%m-%d %H:%M:%S") + " +0500 PKT"
+        self.ROWS = [["c1", "new", "Up", fmt(now - timedelta(minutes=10))],
+                     ["c2", "mid", "Up", fmt(now - timedelta(days=3))],
+                     ["c3", "old", "Exited", fmt(now - timedelta(days=60))]]
+        super().setUp()
+        self.dm.show_table(self.COLS, self.ROWS, 'container', "All Containers")
+
+    def test_parses_docker_timestamps(self):
+        from src.ui.ui_display import DisplayManager as D
+        self.assertEqual(D._parse_row_date("2026-10-15 15:06:49 +0500 PKT").hour, 15)
+        self.assertEqual(D._parse_row_date("2026-10-13 02:34:04.770160954 +0500 PKT").minute, 34)
+        self.assertIsNone(D._parse_row_date(""))
+
+    def test_preset_filters_by_age(self):
+        self.dm._apply_filters("Last 24 hours", "", "")
+        self.assertEqual(self._names(), ['new'])
+        self.dm._apply_filters("Last 30 days", "", "")
+        self.assertEqual(self._names(), ['new', 'mid'])
+
+    def test_custom_range_from_to(self):
+        from datetime import datetime, timedelta
+        day = (datetime.now() - timedelta(days=3)).strftime("%Y-%m-%d")
+        self.dm._apply_filters("Custom range", day, day)
+        self.assertEqual(self._names(), ['mid'])
+
+    def test_clear_filters_restores_rows(self):
+        self.dm._apply_filters("Last hour", "", "")
+        self.dm._clear_filters()
+        self.assertEqual(len(self._names()), 3)
+
+    def _open_popup(self):
+        self.dm._filter_btn.invoke()
+        popup = self.dm._filter_popup
+        popup.update()
+        return popup
+
+    def _buttons(self, popup):
+        found = {}
+        def walk(w):
+            for c in w.winfo_children():
+                if isinstance(c, ttk.Button):
+                    found[c.cget("text")] = c
+                walk(c)
+        walk(popup)
+        return found
+
+    def test_filter_button_opens_popup_under_it_and_toggles(self):
+        btn = self.dm._filter_btn
+        self.assertIsNotNone(btn)
+        popup = self._open_popup()
+        self.assertGreaterEqual(popup.winfo_rooty(), btn.winfo_rooty() + btn.winfo_height())
+        btn.invoke()
+        self.assertFalse(popup.winfo_exists())
+
+    def test_popup_changes_wait_for_apply(self):
+        popup = self._open_popup()
+        popup._preset.set("Last 24 hours")
+        popup._sync_custom_rows()
+        self.assertEqual(len(self._names()), 3)
+        self._buttons(popup)["Apply"].invoke()
+        self.assertEqual(self._names(), ['new'])
+        self.assertFalse(popup.winfo_exists())
+        self.assertIn("●", self.dm._filter_btn.cget("text"))
+
+    def test_popup_prefills_current_filter_and_clear_resets_it(self):
+        self.dm._apply_filters("Last hour", "", "")
+        popup = self._open_popup()
+        self.assertEqual(popup._preset.get(), "Last hour")
+        self._buttons(popup)["Clear filters"].invoke()
+        self.assertEqual(len(self._names()), 3)
+        self.assertEqual(self.dm._preset_var.get(), "Any time")
+        self.assertNotIn("●", self.dm._filter_btn.cget("text"))
+
+    def test_custom_range_rows_only_for_custom_and_non_custom_drops_dates(self):
+        popup = self._open_popup()
+        self.assertEqual(popup._custom.winfo_manager(), "")
+        popup._preset.set("Custom range")
+        popup._sync_custom_rows()
+        self.assertEqual(popup._custom.winfo_manager(), "grid")
+        popup._from.set("2020-01-01")
+        popup._preset.set("Last hour")
+        self._buttons(popup)["Apply"].invoke()
+        self.assertEqual(self.dm._from_var.get(), "")
+
+    def test_outside_click_and_escape_close_popup(self):
+        self.root.deiconify()   # a withdrawn window cannot hand keyboard focus to its popup
+        popup = self._open_popup()
+        self.dm._dismiss_filter_popup(MagicMock(widget=self.tree))
+        self.assertFalse(popup.winfo_exists())
+        popup = self._open_popup()
+        popup.focus_force()
+        popup.update()
+        popup.event_generate("<Escape>")
+        popup.update()
+        self.assertFalse(popup.winfo_exists())
+
+    def test_reload_closes_popup(self):
+        popup = self._open_popup()
+        self.dm.show_table(self.COLS, self.ROWS, 'container', "All Containers")
+        self.assertFalse(popup.winfo_exists())
+
+    def test_no_filter_button_without_date_column(self):
+        self.dm.show_table(["VOLUME NAME"], [["v1"]], 'volume', "Volumes")
+        self.assertIsNone(self.dm._filter_btn)
+
+    def test_sort_dropdown_created_is_newest_first(self):
+        self.dm._sort_var.set("CREATED")
+        self.dm._on_sort_selected()
+        self.assertEqual(self._names(), ['new', 'mid', 'old'])
+        self.dm._toggle_sort_order()
+        self.assertEqual(self._names(), ['old', 'mid', 'new'])
+
+    def test_header_click_updates_sort_dropdown(self):
+        self.dm.sort_by(1)
+        self.assertEqual(self.dm._sort_var.get(), "NAMES")
+
+
+class TestSortByValue(_TableFixture):
+    """Sorting compares sizes, percentages, numbers and names by value, not as plain text."""
+    COLS = ["REPOSITORY", "SIZE", "CPU %", "NAMES"]
+    ROWS = [["a", "1.1GB", "0.50%", "web10"],
+            ["b", "2GB", "12.00%", "web2"],
+            ["c", "13MB", "3.00%", "Web1"],
+            ["d", "25.9kB", "", ""],
+            ["e", "1.47GB", "100.00%", "db"],
+            ["f", "0B", "0.10%", "api"]]
+
+    def _col(self, index):
+        return [self.tree.item(i)['values'][index] for i in self.tree.get_children()]
+
+    def test_sizes_sort_by_bytes_large_to_small(self):
+        self.dm.sort_by(1)
+        self.dm.sort_by(1)
+        self.assertEqual(self._col(2), ['2 GB', '1.47 GB', '1.1 GB', '13 MB', '25.9 kB', '0 B'])
+
+    def test_sizes_sort_small_to_large(self):
+        self.dm.sort_by(1)
+        self.assertEqual(self._col(2), ['0 B', '25.9 kB', '13 MB', '1.1 GB', '1.47 GB', '2 GB'])
+
+    def test_percentages_sort_numerically(self):
+        self.dm.sort_by(2)
+        self.assertEqual(self._col(3), ['0.10%', '0.50%', '3.00%', '12.00%', '100.00%', self.dm.EMPTY_CELL])
+
+    def test_empty_cells_stay_last_in_both_directions(self):
+        self.dm.sort_by(2)
+        self.assertEqual(self._col(1)[-1], 'd')
+        self.dm.sort_by(2)
+        self.assertEqual(self._col(1)[-1], 'd')
+
+    def test_names_sort_case_insensitive_with_numbers_in_order(self):
+        self.dm.sort_by(3)
+        self.assertEqual(self._col(4), ['api', 'db', 'Web1', 'web2', 'web10', self.dm.EMPTY_CELL])
+
+    def test_binary_and_decimal_units(self):
+        from src.ui.ui_display import DisplayManager as D
+        probe = type("P", (), {"_sort_col": 0, "_date_col": None, "_SIZE": D._SIZE, "_NUMBER": D._NUMBER,
+                                  "_AGE": D._AGE, "_AGE_SECONDS": D._AGE_SECONDS})()
+        key = lambda v: D._sort_key(probe, [v])
+        self.assertEqual(key("1KiB"), key("1024B"))
+        self.assertLess(key("1kB"), key("1KiB"))
+        self.assertLess(key("98.3kB (virtual 236MB)"), key("1MB"))
+        self.assertLess(key("12.5MiB / 7.6GiB"), key("1GB"))
+
+    def test_date_upper_bound_covers_whole_minute(self):
+        from datetime import datetime
+        from src.ui.ui_display import DisplayManager as D
+        self.assertEqual(D._parse_user_date("2026-10-15 15:06", end_of_day=True), datetime(2026, 10, 15, 15, 6, 59))
+        self.assertEqual(D._parse_user_date("2026-10-15 15:06"), datetime(2026, 10, 15, 15, 6))
+
+
+class TestRoundedHelpers(_Base):
+    """src/ui/rounded.py: layout rewriting and the Canvas-backed rounded surfaces."""
+
+    def test_swap_element_replaces_border_and_keeps_children(self):
+        from src.ui.rounded import _swap_element
+        layout = [('Button.border', {'border': '1', 'sticky': 'nswe',
+                                     'children': [('Button.label', {'sticky': 'nswe'})]})]
+        out = _swap_element(layout, 'Button.border', 'Rounded0.Button.border')
+        name, opts = out[0]
+        self.assertEqual(name, 'Rounded0.Button.border')
+        self.assertNotIn('border', opts)
+        self.assertEqual(opts['children'][0][0], 'Button.label')
+
+    def test_swap_element_replaces_inherited_rounded_element(self):
+        from src.ui.rounded import _swap_element
+        layout = [('Rounded3.Button.border', {'sticky': 'nswe'})]
+        out = _swap_element(layout, 'Button.border', 'Rounded9.Button.border')
+        self.assertEqual(out[0][0], 'Rounded9.Button.border')
+
+    def test_readable_keeps_legible_colours_and_fixes_weak_ones(self):
+        from src.ui.rounded import readable, on_fill, contrast
+        self.assertEqual(readable("#ffffff", "#222222"), "#ffffff")
+        self.assertGreaterEqual(contrast(readable("#00bc8c", "#ffffff"), "#ffffff"), 4.5)   # accent on light
+        self.assertGreaterEqual(contrast(readable("#6e40c0", "#190831"), "#190831"), 4.5)   # accent on dark
+        self.assertGreaterEqual(contrast(readable("#888888", "#e9ecef"), "#e9ecef"), 4.5)
+        self.assertEqual(on_fill("#00bc8c", "#ffffff"), "#000000")   # white on bright green is 2.4:1
+        self.assertEqual(on_fill("#375a7f", "#ffffff"), "#ffffff")
+
+    def test_badge_grows_with_its_text(self):
+        from src.ui.rounded import RoundedBadge
+        badge = RoundedBadge(self.root, text="1")
+        badge.pack()
+        self.root.update_idletasks()
+        narrow = badge.winfo_reqwidth()
+        badge.set_text("38 of 38 containers")
+        self.root.update_idletasks()
+        self.assertGreater(badge.winfo_reqwidth(), narrow)
+
+    def test_make_remembers_colours_for_theme_changes(self):
+        from src.ui import rounded
+        label = rounded.make(tk.Label, self.root, text="x", bg="#0d1117", fg="#ffffff")
+        label.configure(bg="#ffffff")            # what a theme switch does to tk widgets
+        rounded.refresh_panels()
+        self.assertEqual(label.cget("bg"), "#0d1117")
+
+
+class TestDateTimePicker(_TableFixture):
+    """Calendar + time picker used by the custom date range."""
+    COLS = ["CONTAINER ID", "NAMES", "STATUS", "CREATED"]
+    ROWS = [["c1", "mid", "Up", "2026-03-10 12:30:00 +0500 PKT"],
+            ["c2", "late", "Up", "2026-03-10 23:59:30 +0500 PKT"],
+            ["c3", "old", "Exited", "2026-01-05 08:00:00 +0500 PKT"]]
+
+    def setUp(self):
+        super().setUp()
+        self.dm.show_table(self.COLS, self.ROWS, 'container', "All Containers")
+
+    def _picker(self, initial=None):
+        from src.ui.datetime_picker import DateTimePicker
+        return DateTimePicker(self.root, initial=initial)
+
+    def test_selecting_a_day_and_time_returns_that_datetime(self):
+        from datetime import datetime, date
+        picker = self._picker(datetime(2026, 3, 10, 9, 5))
+        picker._select(date(2026, 3, 12))
+        picker._hour.set("17")
+        picker._minute.set("45")
+        picker._ok()
+        self.assertEqual(picker.result, datetime(2026, 3, 12, 17, 45))
+
+    def test_month_navigation_wraps_years(self):
+        from datetime import datetime
+        picker = self._picker(datetime(2026, 12, 15, 0, 0))
+        picker._shift_month(1)
+        self.assertEqual((picker._year, picker._month), (2027, 1))
+        picker._shift_month(-13)
+        self.assertEqual((picker._year, picker._month), (2025, 12))
+        picker.destroy()
+
+    def test_out_of_range_time_is_clamped(self):
+        from datetime import datetime
+        picker = self._picker(datetime(2026, 3, 10, 0, 0))
+        picker._hour.set("99")
+        picker._minute.set("abc")
+        self.assertEqual(picker.selected_datetime(), datetime(2026, 3, 10, 23, 0))
+        picker.destroy()
+
+    def test_clear_returns_empty_string_and_cancel_returns_none(self):
+        picker = self._picker()
+        picker._clear()
+        self.assertEqual(picker.result, "")
+        picker = self._picker()
+        picker.destroy()
+        self.assertIsNone(picker.result)
+
+    @patch('src.ui.ui_display.pick_datetime')
+    def test_picked_values_fill_the_range_and_filter(self, mock_pick):
+        from datetime import datetime
+        mock_pick.return_value = datetime(2026, 3, 10, 0, 0)
+        self.dm._pick_date(self.dm._from_var, end_of_day=False)
+        mock_pick.return_value = datetime(2026, 3, 10, 23, 59)
+        self.dm._pick_date(self.dm._to_var, end_of_day=True)
+        self.assertEqual(self.dm._from_var.get(), "2026-03-10 00:00")
+        self.assertEqual(self.dm._to_var.get(), "2026-03-10 23:59")
+        self.dm._apply_filters("Custom range", self.dm._from_var.get(), self.dm._to_var.get())
+        # "To 23:59" covers the whole minute, so the 23:59:30 row is included
+        names = [self.tree.item(i)['values'][2] for i in self.tree.get_children()]
+        self.assertEqual(names, ['mid', 'late'])
+
+    @patch('src.ui.ui_display.pick_datetime', return_value=None)
+    def test_cancelled_picker_changes_nothing(self, _):
+        self.dm._from_var.set("2026-03-10")
+        self.dm._pick_date(self.dm._from_var, end_of_day=False)
+        self.assertEqual(self.dm._from_var.get(), "2026-03-10")
+
+
+class TestMutationFeedback(_Base):
+    """State-changing row actions keep the table and refresh it; failures show details."""
+
+    def _run(self, output):
+        dm = MagicMock()
+        dm.get_selected_items.return_value = [MagicMock()]
+        dm.get_item_values.return_value = _F_CONTAINER
+        dm.current_table_type = 'container'
+        from src.shared.item_actions import create_selected_item_actions
+        with patch('src.config.config_manager.get_sudo_password', return_value=FAKE_PW), \
+             patch('src.shared.item_actions.check_docker_running', return_value=True), \
+             patch('src.shared.item_actions.run_docker_cmd') as mock_run:
+            # run root.after callbacks inline so no Tk event loop (and its stale timers) is needed
+            root = MagicMock()
+            root.after.side_effect = lambda _ms, fn: fn()
+            btns, _ = create_selected_item_actions(ttk.Frame(self.root), root, dm, MagicMock(), MagicMock())
+            btns['start'].invoke()
+            mock_run.call_args.kwargs['callback'](output)
+        return dm
+
+    def test_success_refreshes_in_place(self):
+        dm = self._run("c1a2b3c4d5e6")
+        dm.refresh_view.assert_called_once()
+        dm.show_text_output.assert_not_called()
+        self.assertEqual(dm.set_status.call_args[0][1], "success")
+
+    def test_failure_shows_output(self):
+        dm = self._run("Error response from daemon: No such container: x")
+        dm.refresh_view.assert_not_called()
+        dm.show_text_output.assert_called_once()
+        self.assertEqual(dm.set_status.call_args[0][1], "error")
+
+
+# ===========================================================================
+# 17. Table cells  (empty-value placeholder, cell selection + copy, row actions)
+# ===========================================================================
+
+class TestFormatCell(unittest.TestCase):
+
+    def setUp(self):
+        from src.ui.cell_format import format_cell
+        self.fmt = format_cell
+
+    def test_dates(self):
+        self.assertEqual(self.fmt("CREATED", "2026-10-14 12:40:02 +0500 PKT"), "14 Oct 2026, 12:40")
+        self.assertEqual(self.fmt("CREATED", "2026-10-13 02:34:04.770160954 +0500 PKT"), "13 Oct 2026, 02:34")
+        self.assertEqual(self.fmt("CREATED", "2 weeks ago"), "2 weeks ago")        # already readable
+        self.assertEqual(self.fmt("CREATED", ""), "")
+
+    def test_sizes_get_a_space_before_the_unit(self):
+        self.assertEqual(self.fmt("SIZE", "2.74MB (virtual 388MB)"), "2.74 MB (virtual 388 MB)")
+        self.assertEqual(self.fmt("SIZE", "0B"), "0 B")
+        self.assertEqual(self.fmt("MEM USAGE", "12.5MiB / 7.6GiB"), "12.5 MiB / 7.6 GiB")
+        self.assertEqual(self.fmt("RECLAIMABLE", "1.2GB (45%)"), "1.2 GB (45%)")
+        self.assertEqual(self.fmt("SIZE", "1.1 GB"), "1.1 GB")                      # no double space
+
+    def test_size_rule_only_applies_to_size_columns(self):
+        self.assertEqual(self.fmt("NAMES", "web1b"), "web1b")
+        self.assertEqual(self.fmt("IMAGE", "app2MB"), "app2MB")
+
+    def test_ports_drop_wildcard_addresses_and_duplicates(self):
+        self.assertEqual(self.fmt("PORTS", "0.0.0.0:8080->80/tcp, [::]:8080->80/tcp, 443/tcp"),
+                         "8080 → 80/tcp, 443/tcp")
+        self.assertEqual(self.fmt("PORTS", "127.0.0.1:5432->5432/tcp, :::5432->5432/tcp"),
+                         "127.0.0.1:5432 → 5432/tcp, 5432 → 5432/tcp")
+        self.assertEqual(self.fmt("PORTS", ""), "")
+
+    def test_compose_status_and_files(self):
+        import os
+        self.assertEqual(self.fmt("STATUS", "running(2), exited(1)"), "running (2), exited (1)")
+        self.assertEqual(self.fmt("STATUS", "Exited (137) 25 hours ago"), "Exited (137) 25 hours ago")
+        home = os.path.expanduser("~")
+        self.assertEqual(self.fmt("CONFIG FILES", f"{home}/a/x.yml,/tmp/y.yml"), "~/a/x.yml, /tmp/y.yml")
+
+
+class TestPopupMenu(_Base):
+
+    def setUp(self):
+        super().setUp()
+        from src.ui.popup_menu import PopupMenu
+        # Pointer events only reach mapped widgets, so map the window but keep it invisible and
+        # off-screen (and never grab the input focus from the user's real windows)
+        self.root.geometry("400x300+-5000+-5000")
+        try:
+            self.root.attributes("-alpha", 0.0)
+        except tk.TclError:
+            pass
+        self.root.deiconify()
+        self.root.update()
+        self.calls = []
+        self.menu = PopupMenu(self.root)
+        self.entries = [("First", lambda: self.calls.append("first"), True),
+                        None,
+                        ("Off", lambda: self.calls.append("off"), False),
+                        ("Last", lambda: self.calls.append("last"), True)]
+        self.menu.show(self.entries, 10, 10, backdrop="#222222")
+        self.root.update()
+
+    def _rows(self):
+        return [e[0] for e in self.menu._entries]
+
+    def _click(self, widget, press=True):
+        if press:
+            widget.event_generate("<ButtonPress-1>", x=3, y=3)
+        widget.event_generate("<ButtonRelease-1>", x=3, y=3)
+
+    def test_opens_with_one_row_per_enabled_entry(self):
+        self.assertTrue(self.menu.is_open)
+        self.assertEqual([r.cget("text") for r in self._rows()], ["First", "Last"])
+
+    def test_left_click_runs_the_entry_and_closes(self):
+        self._click(self._rows()[1])
+        self.assertEqual(self.calls, ["last"])
+        self.assertFalse(self.menu.is_open)
+
+    def test_release_without_a_press_on_the_entry_does_nothing(self):
+        self._click(self._rows()[0], press=False)                  # e.g. a drag that ended here
+        self.assertEqual(self.calls, [])
+        self.assertTrue(self.menu.is_open)
+
+    def test_wheel_and_other_buttons_do_not_pick_entries(self):
+        row = self._rows()[0]
+        for button in (2, 3, 4, 5):
+            row.event_generate(f"<ButtonPress-{button}>", x=3, y=3)
+            row.event_generate(f"<ButtonRelease-{button}>", x=3, y=3)
+        row.event_generate("<MouseWheel>", x=3, y=3, delta=120)
+        self.assertEqual(self.calls, [])
+
+    def test_wheel_over_the_menu_does_not_close_it(self):
+        self._rows()[0].event_generate("<ButtonPress-5>", x=3, y=3)
+        self.assertTrue(self.menu.is_open)
+
+    def test_click_elsewhere_closes_it_without_running_anything(self):
+        self.root.event_generate("<ButtonPress-1>", x=1, y=1)
+        self.assertFalse(self.menu.is_open)
+        self.assertEqual(self.calls, [])
+
+    def test_escape_closes_it(self):
+        self.assertTrue(self.root.bind_all("<Escape>"))               # bound for the whole app
+        self.menu._on_escape(None)    # generated key events need real X focus, so call the handler
+        self.assertFalse(self.menu.is_open)
+
+    def test_arrow_keys_and_enter_choose_an_entry_skipping_disabled_ones(self):
+        for key in ("<Up>", "<Down>", "<Return>", "<space>"):
+            self.assertTrue(self.menu._holder.bind(key), key)         # keys are wired to the popup
+        self.menu._move(1); self.menu._move(1)                        # first, then last (Off is skipped)
+        self.menu._activate(self.menu._active)
+        self.assertEqual(self.calls, ["last"])
+        self.assertFalse(self.menu.is_open)
+
+    def test_hover_highlights_one_entry_at_a_time(self):
+        first, last = self._rows()
+        first.event_generate("<Enter>"); last.event_generate("<Enter>")
+        self.assertNotEqual(str(first.cget("bg")), str(last.cget("bg")))
+
+    def test_menu_slides_up_to_stay_inside_the_window(self):
+        self.menu.show(self.entries, self.root.winfo_rootx() + 20, self.root.winfo_rooty() + 290)
+        self.root.update()
+        holder = self.menu._holder
+        self.assertLessEqual(holder.winfo_y() + holder.winfo_reqheight(), self.root.winfo_height())
+        self.assertGreaterEqual(holder.winfo_y(), 0)
+
+    def test_reopening_replaces_the_previous_menu(self):
+        old = self.menu._holder
+        self.menu.show(self.entries, 20, 20)
+        self.root.update()
+        self.assertFalse(old.winfo_exists())
+        self.assertTrue(self.menu.is_open)
+
+    def test_closed_panels_do_not_pile_up_in_the_rounded_registry(self):
+        from src.ui import rounded
+        before = len(rounded._panels)
+        for _ in range(3):
+            self.menu.show(self.entries, 10, 10)
+        self.menu.close()
+        self.assertLessEqual(len(rounded._panels), before)
+
+
+class TestTableCells(_TableFixture):
+
+    def _cell(self, row, column):
+        """Make a cell active the way a click would (the withdrawn test window has no geometry)."""
+        iid = str(row)
+        self.tree.selection_set(iid)
+        self.dm.cells.iid, self.dm.cells.col = iid, f"#{self.COLS.index(column) + 2}"
+
+    def test_empty_values_show_a_placeholder(self):
+        ports = [self.tree.item(i)['values'][5] for i in self.tree.get_children()]
+        self.assertEqual(ports, ["80/tcp", self.dm.EMPTY_CELL, self.dm.EMPTY_CELL])
+
+    def test_whitespace_only_value_counts_as_empty(self):
+        self.dm.show_table(self.COLS, [["c1", "web", "nginx", "Up", "  ", "1B"]], 'container', "All Containers")
+        self.assertEqual(self.tree.item("0")['values'][5], self.dm.EMPTY_CELL)
+
+    def test_row_values_keep_real_blanks_for_actions(self):
+        self.assertEqual(self.dm.get_item_values("1"), [2, "c2", "db", "pg", "Exited (0) 3 days ago", "", "2B"])
+
+    def test_search_does_not_match_the_placeholder(self):
+        self.dm.search_entry.insert(0, self.dm.EMPTY_CELL)
+        self.dm.perform_search()
+        self.assertEqual(self.tree.get_children(), ())
+
+    def test_cell_value_is_raw_text_with_column_name(self):
+        self._cell(1, "NAMES")
+        self.assertEqual(self.dm.cells.value(), ("NAMES", "db"))
+        self._cell(1, "PORTS")
+        self.assertEqual(self.dm.cells.value(), ("PORTS", ""))     # copies '', never the placeholder
+
+    def test_no_active_cell_has_no_value(self):
+        self.assertIsNone(self.dm.cells.value())
+
+    def test_active_cell_follows_its_row_through_a_reload_and_sort(self):
+        self._cell(0, "NAMES")                                      # web
+        self.dm.sort_by(1)                                          # NAMES ascending: cache, db, web
+        self.assertEqual(self.dm.cells.iid, "2")
+        self.assertEqual(self.dm.cells.value(), ("NAMES", "web"))
+
+    def test_active_cell_is_dropped_when_its_row_disappears(self):
+        self._cell(0, "NAMES")
+        self.dm.show_table(self.COLS, self.ROWS[1:], 'container', "All Containers")
+        self.assertIsNone(self.dm.cells.iid)
+
+    def test_selected_rows_text_has_header_and_shown_values(self):
+        self.tree.selection_set(["1"])
+        self.assertEqual(self.dm.selected_rows_text().split("\n"),
+                         ["No.\tCONTAINER ID\tNAMES\tIMAGE\tSTATUS\tPORTS\tSIZE",
+                          "2\tc2\tdb\tpg\tExited (0) 3 days ago\t\t2 B"])
+
+    def test_row_actions_list_the_toolbar_actions_with_enabled_state(self):
+        self.tree.selection_set("0")
+        self.dm.update_selection_state()
+        actions = {label: enabled for label, _, enabled in self.dm.row_actions()}
+        self.assertEqual(len(actions), len(self.dm._visible_action_buttons))
+        self.assertTrue(any(actions.values()))
+        self.tree.selection_set("0", "1")
+        self.dm.update_selection_state()
+        multi = {label: enabled for label, _, enabled in self.dm.row_actions()}
+        self.assertFalse(all(multi.values()))                       # single-row actions are off
+
+    def test_dates_show_in_a_readable_form_but_still_sort_and_filter(self):
+        cols = ["NAME", "CREATED"]
+        rows = [["old", "2026-05-17 00:19:23.734200882 +0500 PKT"], ["new", "2026-10-15 10:45:32 +0500 PKT"]]
+        self.dm.show_table(cols, rows, 'network', "Networks")
+        self.dm.sort_by(1)
+        self.assertEqual([self.tree.item(i)['values'][2] for i in self.tree.get_children()],
+                         ["17 May 2026, 00:19", "15 Oct 2026, 10:45"])
+        self.assertEqual(self.dm.get_item_values("1")[2], "2026-10-15 10:45:32 +0500 PKT")   # actions keep raw
+        self.dm.search_entry.insert(0, "oct 2026")                # searches what is shown
+        self.dm.perform_search()
+        self.assertEqual(len(self.tree.get_children()), 1)
+
+    def test_cell_copy_gives_the_shown_text(self):
+        self.dm.show_table(["NAME", "CREATED"], [["n", "2026-10-15 10:45:32 +0500 PKT"]], 'network', "Networks")
+        self.tree.selection_set("0")
+        self.dm.cells.iid, self.dm.cells.col = "0", "#3"
+        self.assertEqual(self.dm.cells.value(), ("CREATED", "15 Oct 2026, 10:45"))
+
+    def test_select_all_rows_selects_only_the_rows_shown(self):
+        self.dm.select_all_rows()
+        self.assertEqual(set(self.tree.selection()), {"0", "1", "2"})
+        self.dm.search_entry.insert(0, "redis")
+        self.dm.perform_search()
+        self.tree.selection_set(())
+        self.dm.select_all_rows()
+        self.assertEqual(len(self.tree.selection()), 1)
+
+    def _right_click(self):
+        """Right-click the first row; returns the PopupMenu the table's context menu opens."""
+        from src.shared.context_menus import setup_table_context_menu
+        from src.ui import popup_menu
+        shown = []
+        original = popup_menu.PopupMenu.show
+        with patch.object(popup_menu.PopupMenu, 'show',
+                          lambda m, entries, *a, **k: (shown.append((m, entries)), original(m, entries, *a, **k))[1]):
+            setup_table_context_menu(self.dm, self.root)
+            event = dict(x=5, y=5, rootx=5, rooty=5)
+            with patch.object(self.tree, 'identify_region', return_value="cell"), \
+                 patch.object(self.tree, 'identify_row', return_value="0"), \
+                 patch.object(self.tree, 'identify_column', return_value="#3"):
+                self.tree.event_generate("<ButtonPress-3>", **event)
+        return shown[0]
+
+    def test_right_click_leaves_the_menu_open(self):
+        """The same click also reaches the app-wide 'click elsewhere closes it' handler."""
+        menu, _entries = self._right_click()
+        self.root.update()
+        self.assertTrue(menu.is_open)
+
+    def test_a_later_click_elsewhere_still_closes_it(self):
+        menu, _entries = self._right_click()
+        self.root.event_generate("<ButtonPress-1>", x=1, y=1)
+        self.assertFalse(menu.is_open)
+
+    def test_context_menu_offers_select_all_and_row_actions(self):
+        _menu, entries = self._right_click()
+        labels = [e[0] for e in entries if e]
+        self.assertIn("Select All Rows (Ctrl+A)", labels)
+        self.assertIn("Close menu", labels)
+        self.assertIn("Copy NAMES: web", labels)
+        self.assertTrue(any("Start" in label for label in labels))
+        self.assertIn(None, entries)                                  # separators between groups
+
+    def _double_click(self, action):
+        btn = self.btns[action]
+        btn.invoke = MagicMock()
+        self.tree.selection_set("0")
+        self.dm.update_selection_state()
+        with patch.object(self.tree, 'identify_region', return_value="cell"):
+            self.dm._on_double_click(MagicMock(x=5, y=5))
+        return btn
+
+    def test_double_click_opens_details(self):
+        self._double_click('inspect_container').invoke.assert_called_once()
+
+    def test_double_click_does_nothing_when_the_action_is_disabled(self):
+        self.tree.selection_set(())
+        self.dm.update_selection_state()
+        btn = self.btns['inspect_container']
+        btn.invoke = MagicMock()
+        with patch.object(self.tree, 'identify_region', return_value="cell"):
+            self.dm._on_double_click(MagicMock(x=5, y=5))
+        btn.invoke.assert_not_called()
+
+    def test_double_click_on_the_heading_does_nothing(self):
+        btn = self.btns['inspect_container']
+        btn.invoke = MagicMock()
+        self.tree.selection_set("0")
+        self.dm.update_selection_state()
+        with patch.object(self.tree, 'identify_region', return_value="heading"):
+            self.dm._on_double_click(MagicMock(x=5, y=5))
+        btn.invoke.assert_not_called()
 
 
 if __name__ == '__main__':
