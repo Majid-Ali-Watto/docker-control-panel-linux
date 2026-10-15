@@ -1,6 +1,11 @@
 """
-Creator details shown on the Docker page.
+Creator and app details shown on the Docker page.
 """
+
+APP_NAME = "Docker Control Panel"
+APP_TAGLINE = "A graphical Docker manager for Linux"
+APP_BUILT_WITH = "Python · Tkinter · ttkbootstrap · Pillow"
+APP_REQUIRES = "Docker Engine on Linux, sudo access"
 
 CREATOR_NAME = "Majid Ali"
 CREATOR_ROLE = "Full Stack Web Developer"

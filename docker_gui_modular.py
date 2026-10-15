@@ -11,6 +11,11 @@ import os
 import glob
 import webbrowser
 
+# Tk creates an X input-method context (XCreateIC) for many widgets, and with an XIM server
+# such as ibus (XMODIFIERS=@im=ibus) every one is a ~90 ms round trip: ~11 s to first paint
+# and slow screens. This panel needs no input-method composition, so opt out before Tk starts.
+os.environ["XMODIFIERS"] = "@im=none"
+
 # Prefer venv packages so ttkbootstrap uses the correct Pillow version
 _venv_pkgs = glob.glob(
     os.path.join(os.path.dirname(os.path.abspath(__file__)),
@@ -31,8 +36,12 @@ from src.config.config_tooltips import (
     CATEGORY_TOOLTIPS,
     SIDEBAR_BOTTOM_TOOLTIPS,
 )
-from src.help.help_commands import commands_info
+from src.help.commands_view import build_commands_tab
 from src.help.help_creator import (
+    APP_BUILT_WITH,
+    APP_NAME,
+    APP_REQUIRES,
+    APP_TAGLINE,
     CREATOR_GITHUB_LABEL,
     CREATOR_GITHUB_URL,
     CREATOR_NAME,
@@ -40,7 +49,7 @@ from src.help.help_creator import (
     CREATOR_PORTFOLIO_URL,
     CREATOR_ROLE,
 )
-from src.help.help_info import help_info
+from src.help.help_info import help_info, docker_landing_info
 from src.config.config_menu import get_menu_structure, VIEW_BUTTONS
 
 # Import utility modules
@@ -123,6 +132,7 @@ class DockerGUI:
 
         self.root.geometry(f"{window_width}x{window_height}")
         self.root.minsize(min_width, min_height)
+        self._maximize()
         
         # References to manually themed widgets (updated on theme change)
         self.sidebar = None
@@ -178,6 +188,13 @@ class DockerGUI:
         # Auto-select Docker category
         self.select_initial_category()
     
+    def _maximize(self):
+        """Open maximised (title bar kept); the geometry above is the restored size."""
+        try:
+            self.root.attributes("-zoomed", True)      # X11 / Wayland (Linux)
+        except tk.TclError:
+            self.root.state("zoomed")                  # Windows / macOS
+
     def setup_styles(self):
         """Setup TTK styles via ttkbootstrap"""
         self.style = ttkbs.Style()  # returns the singleton created by Window
@@ -576,7 +593,7 @@ class DockerGUI:
         # App banner
         app_banner = tk.Label(
             creator_content,
-            text="🐳  Docker Control Panel",
+            text=f"🐳  {APP_NAME}",
             font=("Arial", 13, "bold"),
             bg=theme["text_bg"],
             fg=theme["text_fg"],
@@ -586,7 +603,7 @@ class DockerGUI:
 
         app_desc = tk.Label(
             creator_content,
-            text="A graphical Docker manager for Linux",
+            text=APP_TAGLINE,
             font=("Arial", 9),
             bg=theme["text_bg"],
             fg=theme["text_fg"],
@@ -686,6 +703,26 @@ class DockerGUI:
         github_link.pack(fill=tk.X, pady=(2, 0))
         github_link.bind("<Button-1>", lambda _: self.open_external_link(CREATOR_GITHUB_URL))
 
+        # Divider
+        tk.Frame(creator_content, bg=theme.get("tree_border", "#444"), height=1).pack(fill=tk.X, pady=(14, 14))
+
+        about_heading = tk.Label(
+            creator_content, text="ABOUT THE APP",
+            font=("Arial", 9, "bold"),
+            bg=theme["text_bg"], fg=theme["text_fg"], anchor="w",
+        )
+        about_heading.pack(fill=tk.X, pady=(0, 6))
+
+        about_lines = [
+            tk.Label(
+                creator_content, text=line, font=("Arial", 9),
+                bg=theme["text_bg"], fg=theme["text_fg"], anchor="w",
+            )
+            for line in (f"Built with  {APP_BUILT_WITH}", f"Requires  {APP_REQUIRES}")
+        ]
+        for label in about_lines:
+            label.pack(fill=tk.X, pady=1)
+
         creator_note = tk.Label(
             creator_content,
             text="Click a link to open it in your browser.",
@@ -701,26 +738,13 @@ class DockerGUI:
             app_banner, app_desc,
             creator_title, creator_name, creator_role,
             links_heading, portfolio_label, github_label,
+            about_heading, *about_lines,
             creator_note,
         ]
         self._creator_link_labels = [portfolio_link, github_link]
         
-        # Commands tab
-        commands_tab = ttk.Frame(help_notebook)
-        help_notebook.add(commands_tab, text=" Commands ")
-        commands_text = tk.Text(
-            commands_tab, wrap=tk.WORD,
-            font=("JetBrains Mono", 9),
-            bg=theme["text_bg"], fg=theme["text_fg"],
-            relief=tk.FLAT, borderwidth=0, padx=8, pady=6
-        )
-        commands_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        commands_scroll = ttk.Scrollbar(commands_tab, orient=tk.VERTICAL, command=commands_text.yview)
-        commands_scroll.pack(side=tk.RIGHT, fill=tk.Y)
-        commands_text.configure(yscrollcommand=commands_scroll.set)
-        commands_text.insert("1.0", commands_info)
-        commands_text.config(state=tk.DISABLED)
-        self._help_cmd_text = commands_text
+        # Commands tab (copyable / downloadable reference)
+        self._help_cmd_text = build_commands_tab(help_notebook, theme)
 
         # Help tab
         help_tab = ttk.Frame(help_notebook)
@@ -1091,6 +1115,9 @@ class DockerGUI:
         
         for i in range(max_cols):
             self.btn_frame.columnconfigure(i, weight=0)
+
+        if category == "Docker":
+            self.display_manager.show_text_output(docker_landing_info)
     
     def select_initial_category(self):
         """Select Docker category on startup"""

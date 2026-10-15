@@ -2256,3 +2256,28 @@ class TestTableCells(_TableFixture):
 
 if __name__ == '__main__':
     unittest.main(verbosity=2)
+
+
+class TestCommandsReference(unittest.TestCase):
+    """The Commands tab data: complete, unique and flattened for copy / download."""
+
+    def test_every_command_has_a_description_and_none_repeat(self):
+        from src.help.help_commands import COMMAND_SECTIONS
+        commands = [c for _, items in COMMAND_SECTIONS for c, d in items if d]
+        self.assertEqual(len(commands), sum(len(items) for _, items in COMMAND_SECTIONS))
+        self.assertEqual(len(commands), len(set(commands)))
+
+    def test_text_export_contains_every_command(self):
+        from src.help.help_commands import COMMAND_SECTIONS, commands_as_text
+        text = commands_as_text()
+        for _, items in COMMAND_SECTIONS:
+            for command, description in items:
+                self.assertIn(command, text)
+                self.assertIn(description, text)
+
+    def test_commands_used_by_the_app_are_listed(self):
+        from src.help.help_commands import commands_as_text
+        text = commands_as_text()
+        for needed in ("docker run -d", "docker stats --no-stream", "docker compose -f <file.yml> build",
+                       "docker rmi -f $(docker images -aq)", "docker image inspect <image>"):
+            self.assertIn(needed, text)
