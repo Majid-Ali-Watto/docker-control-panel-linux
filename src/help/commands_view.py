@@ -28,6 +28,8 @@ class CommandsTab(ttk.Frame):
         self._headers = {}          # (set key, section title) -> header frame
         self._shown_headers = set()
         self._pending = []
+        self._queued = set()
+        self._filling = False       # a batch is scheduled
 
         self._build_toolbar()
         self.footer = ttk.Label(self, text="Click a command to copy it.", font=("Arial", 8), anchor=tk.W)
@@ -70,10 +72,17 @@ class CommandsTab(ttk.Frame):
         if self._built:
             return
         self._built = True
-        self._pending = [(key, title, command, description)
-                         for key, (_label, sections) in _SETS.items()
-                         for title, commands in sections for command, description in commands]
-        self._add_batch()
+        self._queue_set(self._set)
+
+    def _queue_set(self, key):
+        """Queue the rows of one set; a set is only built when it is first shown."""
+        if key in self._queued:
+            return
+        self._queued.add(key)
+        self._pending += [(key, title, command, description)
+                          for title, commands in _SETS[key][1] for command, description in commands]
+        if not self._filling:
+            self._add_batch()
 
     def _add_batch(self):
         """Create the rows a few at a time: hundreds of widgets at once take over a second to map,
@@ -89,6 +98,7 @@ class CommandsTab(ttk.Frame):
             self._place(*entry)
         del self._pending[:_BATCH]
         self._refresh_empty()
+        self._filling = bool(self._pending)
         if self._pending:
             self.after(5, self._add_batch)
 
@@ -134,6 +144,8 @@ class CommandsTab(ttk.Frame):
     def _select_set(self, key):
         self._set = key
         self._refresh_categories()
+        if self._built:
+            self._queue_set(key)
         self._apply_filter()
         self.list.scroll_to_top()
 

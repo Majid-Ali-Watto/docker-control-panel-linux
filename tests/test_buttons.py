@@ -2300,6 +2300,24 @@ class TestCommandsReference(unittest.TestCase):
                        "docker compose exec <service> sh", "docker compose -f <a.yml> -f <b.yml> up -d"):
             self.assertIn(needed, reference)
 
+    def test_reference_covers_every_group_with_its_variants(self):
+        from src.help.help_commands import COMMAND_SECTIONS
+        reference = {c for _, items in COMMAND_SECTIONS for c, _d in items}
+        for needed in (
+            "docker ps -a", "docker ps -a --filter status=exited", "docker run -d --name <name> <image>",
+            "docker run -it --rm <image> sh", "docker run -d -p <host>:<container> <image>",
+            "docker run -d --restart unless-stopped <image>", "docker exec -it <container> bash",
+            "docker logs -f --tail 100 <container>", "docker rm -f <container>", "docker container prune -f",
+            "docker images -a", "docker pull <image>:<tag>", "docker build -t <name:tag> -f <Dockerfile> .",
+            "docker build --no-cache -t <name:tag> .", "docker rmi -f <image>", "docker image prune -a",
+            "docker volume ls --filter dangling=true", "docker volume create <name>", "docker volume prune -a",
+            "docker network create --subnet <cidr> <name>", "docker network connect <network> <container>",
+            "docker network prune -f", "docker system prune -a --volumes", "docker builder prune",
+            "docker events --filter type=container", "systemctl enable --now docker", "journalctl -u docker -f",
+            "sudo usermod -aG docker $USER",
+        ):
+            self.assertIn(needed, reference)
+
     def test_templates_are_shown_readably(self):
         from src.help.help_commands import _display_template
         self.assertEqual(_display_template("X", "docker stop {containers}"), "docker stop <containers>")
