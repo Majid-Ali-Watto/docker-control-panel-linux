@@ -12,7 +12,9 @@ import tempfile
 
 from src.docker.actions import check_docker_running
 from src.config.config_manager import get_sudo_password
-from src.utils.utils import run_cmd, clean_subprocess_env
+from src.docker.commands import DOCKER_CONTAINER_LOGS, DOCKER_CONTAINER_LOGS_FOLLOW
+from src.docker.operations import stream_docker_cmd, cancel_stream
+from src.utils.utils import run_cmd, clean_subprocess_env, check_terminal_installed, engine
 from src.utils.threads import startThreadForTask
 from src.shared.helpers import _quote
 
@@ -316,8 +318,8 @@ def open_container_terminal_dialog(root, display_manager):
         script_file.write('#!/bin/bash\n')
         script_file.write(f'echo -ne "\\033]0;{container_name} ({container_id[:12]})\\007"\n')
         prompt = f'{container_name}({container_id[:12]})# '
-        script_file.write(f'{docker_prefix}docker exec -it {cid_q} /bin/bash -c \'PS1="{prompt}" exec /bin/bash\' 2>/dev/null || \\\n')
-        script_file.write(f'{docker_prefix}docker exec -it {cid_q} /bin/sh -c \'PS1="{prompt}" exec /bin/sh\'\n')
+        script_file.write(f'{docker_prefix}{engine()} exec -it {cid_q} /bin/bash -c \'PS1="{prompt}" exec /bin/bash\' 2>/dev/null || \\\n')
+        script_file.write(f'{docker_prefix}{engine()} exec -it {cid_q} /bin/sh -c \'PS1="{prompt}" exec /bin/sh\'\n')
         if askpass_path:
             script_file.write(f'rm -f {_quote(askpass_path)}\n')
         script_file.write('echo ""\n')
@@ -339,6 +341,9 @@ def open_container_terminal_dialog(root, display_manager):
         ('terminator', ['terminator', '-T', title, '-x', script_path]),
         ('xterm', ['xterm', '-title', title, '-e', script_path]),
     ]
+
+    preferred = check_terminal_installed()
+    terminals.sort(key=lambda entry: entry[0] != preferred)   # stable: the Settings choice goes first
 
     success = False
     last_error = None
@@ -399,7 +404,7 @@ def open_container_terminal_dialog(root, display_manager):
         except OSError:
             pass
 
-        fallback_cmd = f"docker exec -it {cid_q} /bin/sh"
+        fallback_cmd = f"{engine()} exec -it {cid_q} /bin/sh"
 
         cmd_dialog = tk.Toplevel(root)
         cmd_dialog.title("Terminal Access")
@@ -462,8 +467,23 @@ def view_container_logs_dialog(root, display_manager):
     container_id = values[1]
     container_name = values[2]
 
+    show_logs_window(
+        root,
+        f"Container Logs - {container_name} ({container_id[:12]})",
+        container_name,
+        lambda lines, timestamps_flag: DOCKER_CONTAINER_LOGS.format(
+            timestamps_flag=timestamps_flag, lines=lines, container=_quote(container_id)),
+        lambda lines, timestamps_flag: DOCKER_CONTAINER_LOGS_FOLLOW.format(
+            timestamps_flag=timestamps_flag, lines=lines, container=_quote(container_id)),
+    )
+
+
+def show_logs_window(root, title, save_name, fetch_command, follow_command, timestamps=True):
+    """Log viewer shared by containers and Compose projects: line count, follow (live), search,
+    save and clear. `fetch_command(lines, timestamps_flag)` and `follow_command(lines,
+    timestamps_flag)` build the docker commands; `timestamps=False` hides the timestamps option."""
     logs_window = tk.Toplevel(root)
-    logs_window.title(f"Container Logs - {container_name} ({container_id[:12]})")
+    logs_window.title(title)
     logs_window.geometry("1000x600")
 
     control_frame = ttk.Frame(logs_window)
@@ -479,9 +499,9 @@ def view_container_logs_dialog(root, display_manager):
     follow_check = ttk.Checkbutton(control_frame, text="Follow (Live)", variable=follow_var)
     follow_check.pack(side=tk.LEFT, padx=10)
 
-    timestamps_var = tk.BooleanVar(value=True)
-    timestamps_check = ttk.Checkbutton(control_frame, text="Show Timestamps", variable=timestamps_var)
-    timestamps_check.pack(side=tk.LEFT, padx=10)
+    timestamps_var = tk.BooleanVar(value=timestamps)
+    if timestamps:
+        ttk.Checkbutton(control_frame, text="Show Timestamps", variable=timestamps_var).pack(side=tk.LEFT, padx=10)
 
     search_frame = ttk.Frame(logs_window)
     search_frame.pack(fill=tk.X, padx=10, pady=(0, 5))
@@ -516,7 +536,7 @@ def view_container_logs_dialog(root, display_manager):
     button_frame = ttk.Frame(logs_window)
     button_frame.pack(fill=tk.X, padx=10, pady=(0, 10))
 
-    follow_thread = {'running': False, 'thread': None}
+    follow_thread = {'running': False, 'controller': None, 'token': None}
     search_state = {'matches': [], 'current_index': -1}
     search_job = {'id': None}
 
@@ -627,11 +647,12 @@ def view_container_logs_dialog(root, display_manager):
         if search_var.get().strip():
             schedule_search_refresh()
 
-    def fetch_logs():
+    def line_count():
         lines = lines_var.get().strip()
-        if not lines.isdigit():
-            lines = "100"
+        return lines if lines.isdigit() else "100"
 
+    def fetch_logs():
+        lines = line_count()
         timestamps_flag = "--timestamps" if timestamps_var.get() else ""
 
         status_label.config(text="⏳ Fetching logs...", foreground=readable_color("orange"))
@@ -641,8 +662,8 @@ def view_container_logs_dialog(root, display_manager):
         logs_window.update()
 
         def fetch_task():
-            result = run_cmd(f"docker logs {timestamps_flag} --tail {lines} {container_id}",
-                           sudo=True, sudo_password=get_sudo_password())
+            result = run_cmd(fetch_command(lines, timestamps_flag),
+                             sudo=True, sudo_password=get_sudo_password())
 
             logs_window.after(
                 0,
@@ -667,40 +688,40 @@ def view_container_logs_dialog(root, display_manager):
 
         timestamps_flag = "--timestamps" if timestamps_var.get() else ""
 
-        def follow_task():
-            process = subprocess.Popen(
-                f"sudo -S docker logs {timestamps_flag} --follow {container_id}",
-                shell=True,
-                stdin=subprocess.PIPE,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                text=True,
-                bufsize=1
-            )
-            process.stdin.write(f"{get_sudo_password()}\n")
-            process.stdin.flush()
-
-            logs_window.after(0, lambda: set_logs_content("", show_empty_message=False))
-
+        def ui(callback):
+            """Run on the Tk thread; the stream's reader thread may outlive the window."""
             try:
-                for line in iter(process.stdout.readline, ''):
-                    if not follow_thread['running']:
-                        process.kill()
-                        break
+                logs_window.after(0, callback)
+            except (tk.TclError, RuntimeError):
+                pass     # the window (or the app) closed while the stream was still delivering
 
-                    logs_window.after(0, lambda value=line: append_log_line(value))
-            except (OSError, ValueError):
-                pass
+        def on_line(line):
+            ui(lambda value=line: append_log_line(value))
 
-            process.kill()
-            logs_window.after(0, lambda: status_label.config(text="✓ Stopped following logs", foreground=readable_color("gray")))
+        token = follow_thread['token'] = object()
 
-        follow_thread['thread'] = threading.Thread(target=follow_task, daemon=True)
-        follow_thread['thread'].start()
+        def on_done(_output, _code, _cancelled):
+            def finish():
+                if follow_thread['token'] is token and follow_thread['running']:
+                    # the stream ended by itself (e.g. the container stopped): release the controls
+                    follow_thread['running'] = False
+                    follow_var.set(False)
+                    follow_check.config(state=tk.NORMAL)
+                    refresh_btn.config(state=tk.NORMAL)
+                status_label.config(text="✓ Stopped following logs", foreground=readable_color("gray"))
+            ui(finish)
+
+        set_logs_content("", show_empty_message=False)
+        follow_thread['controller'] = stream_docker_cmd(
+            follow_command(line_count(), timestamps_flag),
+            sudo=True, sudo_password=get_sudo_password(),
+            output_callback=on_line, complete_callback=on_done,
+        )
 
     def stop_follow():
         if follow_thread['running']:
             follow_thread['running'] = False
+            cancel_stream(follow_thread['controller'])
             follow_var.set(False)
             follow_check.config(state=tk.NORMAL)
             refresh_btn.config(state=tk.NORMAL)
@@ -728,7 +749,7 @@ def view_container_logs_dialog(root, display_manager):
             parent=logs_window,
             defaultextension=".log",
             filetypes=[("Log files", "*.log"), ("Text files", "*.txt"), ("All files", "*.*")],
-            initialfile=f"{container_name}_logs.log"
+            initialfile=f"{save_name}_logs.log"
         )
         if filename:
             try:

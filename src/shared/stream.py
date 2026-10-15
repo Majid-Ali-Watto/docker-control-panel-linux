@@ -6,7 +6,7 @@ import tkinter as tk
 from tkinter import ttk
 
 from src.docker.operations import stream_docker_cmd, cancel_stream
-from src.utils.utils import run_cmd
+from src.utils.utils import run_cmd, notify
 from src.shared.helpers import _quote
 
 
@@ -220,6 +220,8 @@ def _start_stream_session(root, title, command, sudo=False, sudo_password=None, 
             if not full_output.strip():
                 session['output_lines'].append(f"Command failed with exit code {return_code}.\n")
         _refresh_stream_window(session)
+        if session['status'] in ('completed', 'warning', 'failed'):
+            notify(session['title'], _session_status_text(session), root)
 
     def _start_stream():
         session['controller'] = stream_docker_cmd(

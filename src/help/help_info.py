@@ -12,7 +12,7 @@ HELP_SECTIONS: (icon, title, one-line summary, blocks). A block is one of
 HELP_SECTIONS = [
     ("🚀", "Getting started", "First launch in three steps", [
         ("steps", [
-            "Launch the app and enter your sudo password once. It is saved in ~/.docker-gui/config.json (readable only by you).",
+            "Launch the app and enter your sudo password once (not asked if your user is in the docker group). It is saved in the desktop keyring, or in ~/.docker-gui/config.json (readable only by you) when there is none.",
             "Check the Docker service status at the top of the sidebar (Running ✅ / Stopped ❌).",
             "Pick a category in the sidebar, then use the buttons above the output to list and manage resources.",
         ]),
@@ -21,11 +21,12 @@ HELP_SECTIONS = [
         ("kv", [
             ("🐳 Docker", "Start, stop or restart the Docker service, and clean everything up."),
             ("📦 Containers", "List all / running / stopped / paused containers; start, stop, restart or delete them in bulk."),
-            ("🖼 Images", "List, pull, search Docker Hub, build, load, prune and delete images. Pull and Build keep running if you close their window."),
+            ("🖼 Images", "List (all / used / unused / dangling), pull, log in to a registry, search Docker Hub, build, load, import, prune and delete images. Pull and Build keep running if you close their window."),
             ("💾 Volumes", "List all / used / unused volumes; create, prune or delete them."),
             ("🕸 Networks", "List networks; create or prune them."),
             ("🧩 Compose", "List Compose projects. “Up From File” takes compose files or a project folder and remembers it, so the project stays listed (as not running) after `compose down`."),
-            ("📊 Stats", "Live CPU / memory / network / disk I/O per container, plus Docker Disk Usage with Images, Containers, Volumes and Build Cache tabs."),
+            ("📊 Stats", "Live CPU / memory / network / disk I/O per container (with CPU and memory trends and a refresh-interval button), plus Docker Disk Usage with Images, Containers, Volumes and Build Cache tabs."),
+            ("⚙ System", "Docker version and info, contexts (switch between local and remote engines), a live events window, buildx builders and build-cache prune."),
             ("💻 Terminal", "A built-in shell for quick commands without leaving the app."),
         ]),
     ]),
@@ -40,11 +41,11 @@ HELP_SECTIONS = [
     ]),
     ("🎯", "Row actions", "What you can do with a selected row", [
         ("kv", [
-            ("Containers", "Start · Stop · Restart · Pause · Unpause · Rename · Delete · Terminal · Logs · Inspect · Commit"),
-            ("Images", "Run · Tag · Save · Inspect · History · Stop Using · Delete"),
+            ("Containers", "Start · Stop · Restart · Pause · Unpause · Rename · Delete · Terminal · Logs · Details · Processes · Changes · Inspect · Commit · Export"),
+            ("Images", "Run · Tag · Save · Scan · Inspect · History · Stop Using · Delete"),
             ("Volumes", "Inspect · Delete"),
             ("Networks", "Connect · Disconnect · Inspect · Delete"),
-            ("Compose", "Up · Down · Restart · Logs · Services · Config"),
+            ("Compose", "Up · Down · Restart · Logs (with follow) · Services · Config"),
         ]),
         ("p", "Actions that change things keep the table on screen and report the result in the status bar; errors show the output with a “← Back” button."),
     ]),
@@ -97,7 +98,9 @@ HELP_SECTIONS = [
             ("Delete", "Remove it; you are asked again on the next launch."),
         ]),
         ("list", [
-            "Stored in ~/.docker-gui/config.json with permissions 0600 and never logged.",
+            "Stored in the desktop keyring when secret-tool is installed, otherwise in ~/.docker-gui/config.json with permissions 0600; never logged.",
+            "If your user can run docker without sudo (docker group), no password is asked or stored.",
+            "Registry passwords and tokens are sent to docker on stdin and never appear in a command line.",
             "Docker commands are built from fixed strings, so typed text cannot inject shell commands.",
         ]),
     ]),

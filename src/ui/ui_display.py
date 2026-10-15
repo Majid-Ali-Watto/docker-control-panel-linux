@@ -9,7 +9,7 @@ from datetime import datetime, timedelta
 from tkinter import ttk
 from tkinter import font as tkfont
 from src.ui.rounded import RoundedBadge, readable_color
-from src.ui.cell_format import DATE_COLUMNS, DOCKER_DATE, format_cell
+from src.ui.cell_format import DATE_COLUMNS, DOCKER_DATE, format_cell, status_tone
 from src.ui.table_cells import CellSelection
 from src.ui.datetime_picker import DATE_FORMAT, pick_datetime
 from src.ui.filter_popup import CUSTOM_RANGE, FilterPopup
@@ -105,6 +105,14 @@ class DisplayManager:
                 pass
             self.live_stats_job = None
     
+    _STATUS_COLORS = {"bad": "#dc3545", "warn": "#d98200", "ok": "#2e9e5b"}
+
+    def apply_status_colors(self):
+        """Text colours for rows whose container needs attention (re-run on every theme change,
+        since legibility depends on the surface behind the text)."""
+        for tone, color in self._STATUS_COLORS.items():
+            self.table_widget.tag_configure(f"status_{tone}", foreground=readable_color(color))
+
     def clear_table(self):
         """Clear all items from table"""
         for i in self.table_widget.get_children():
@@ -114,11 +122,12 @@ class DisplayManager:
 
     _FILTERABLE = ('container', 'container_stats', 'image', 'volume', 'network', 'compose',
                    'compose_service', 'disk_storage', 'disk_images', 'disk_containers',
-                   'disk_volumes', 'disk_cache')
+                   'disk_volumes', 'disk_cache', 'context')
     _NOUNS = {'container': 'container', 'container_stats': 'container', 'image': 'image',
               'volume': 'volume', 'network': 'network', 'compose': 'project',
               'compose_service': 'service', 'disk_storage': 'row', 'disk_images': 'image',
-              'disk_containers': 'container', 'disk_volumes': 'volume', 'disk_cache': 'record'}
+              'disk_containers': 'container', 'disk_volumes': 'volume', 'disk_cache': 'record',
+              'context': 'context'}
     _NO_SORT = "Original order"
     EMPTY_CELL = "—"
     _DATE_COLUMNS = DATE_COLUMNS
@@ -238,10 +247,14 @@ class DisplayManager:
         cell_key = self._row_key(self.cells.iid)
         self.clear_table()
         rows = self._shown = self._visible_rows()
+        status_col = self._columns.index("STATUS") if "STATUS" in self._columns else None
         for idx, row in enumerate(rows, start=1):
-            tag = 'evenrow' if idx % 2 == 0 else 'oddrow'
+            tags = ['evenrow' if idx % 2 == 0 else 'oddrow']
+            tone = status_tone(row[status_col]) if status_col is not None and status_col < len(row) else None
+            if tone:
+                tags.append(f"status_{tone}")
             shown = [t if t.strip() else self.EMPTY_CELL for t in self._formatted(row)]
-            self.table_widget.insert("", tk.END, iid=str(idx - 1), values=[idx] + shown, tags=(tag,))
+            self.table_widget.insert("", tk.END, iid=str(idx - 1), values=[idx] + shown, tags=tuple(tags))
         keep = [str(i) for i, row in enumerate(rows) if row and str(row[0]) in selected_keys]
         if keep:
             self.table_widget.selection_set(keep)
@@ -435,23 +448,27 @@ class DisplayManager:
 
     _ACTION_LAYOUT = {
         'container': ['start', 'stop', 'restart', 'pause', 'unpause', 'rename',
-                      'delete', 'terminal', 'logs', 'inspect_container', 'commit', 'browse_files'],
+                      'delete', 'terminal', 'logs', 'details', 'top', 'diff', 'inspect_container',
+                      'commit', 'export', 'browse_files'],
         'container_stats': ['start', 'stop', 'restart', 'pause', 'unpause',
-                            'delete', 'terminal', 'logs', 'inspect_container'],
+                            'delete', 'terminal', 'logs', 'details', 'top', 'inspect_container'],
         'image': ['delete_image', 'push_image', 'run', 'stop_using', 'tag_image',
-                  'save_image', 'inspect_image', 'history_image'],
+                  'save_image', 'scan_image', 'inspect_image', 'history_image'],
         'volume': ['delete_volume', 'inspect_volume'],
         'network': ['delete_network', 'inspect_network', 'connect_network', 'disconnect_network'],
-        'disk_images': ['delete_image', 'inspect_image', 'history_image'],
-        'disk_containers': ['start', 'stop', 'restart', 'pause', 'unpause', 'delete', 'inspect_container'],
+        'disk_images': ['delete_image', 'scan_image', 'inspect_image', 'history_image'],
+        'disk_containers': ['start', 'stop', 'restart', 'pause', 'unpause', 'delete', 'details',
+                            'inspect_container'],
         'disk_volumes': ['delete_volume', 'inspect_volume'],
         'compose': ['compose_up', 'compose_up_build', 'compose_build', 'compose_pull',
                     'compose_restart', 'compose_stop', 'compose_down', 'compose_down_volumes',
                     'compose_logs', 'compose_services', 'compose_inspect'],
+        'context': ['use_context', 'inspect_context'],
     }
     # Actions that operate on exactly one row (they prompt, open a window, or show one item)
     _SINGLE_ROW_ACTIONS = {
         'rename', 'terminal', 'logs', 'inspect_container', 'commit', 'browse_files',
+        'details', 'top', 'diff', 'export', 'scan_image', 'use_context', 'inspect_context',
         'push_image', 'tag_image', 'save_image', 'inspect_image', 'history_image',
         'inspect_volume', 'inspect_network', 'connect_network', 'disconnect_network',
         'compose_logs', 'compose_services', 'compose_inspect',
@@ -481,14 +498,15 @@ class DisplayManager:
         self._layout_action_buttons()
         self.update_selection_state()
 
-        # Stats control buttons (Refresh / Live Stats) sit on the right of the same bar
+        # Stats control buttons (interval / Live Stats / Refresh) sit on the right of the same bar
         if self.current_table_type == 'container_stats':
+            columns = {"⏱": 97, "Live Stats": 98, "Refresh": 99}
             for widget in self.action_frame.winfo_children():
-                if isinstance(widget, ttk.Button) and (
-                    "Refresh" in str(widget.cget("text")) or "Live Stats" in str(widget.cget("text"))
-                ):
-                    widget.grid(row=0, column=99, sticky="e", padx=5)
-            self.action_frame.columnconfigure(98, weight=1)
+                if isinstance(widget, ttk.Button):
+                    key = next((k for k in columns if k in str(widget.cget("text"))), None)
+                    if key:
+                        widget.grid(row=0, column=columns[key], sticky="e", padx=5)
+            self.action_frame.columnconfigure(96, weight=1)
 
     def _layout_action_buttons(self):
         """Grid the visible action buttons, wrapping onto new lines to fit the window width."""
@@ -508,7 +526,7 @@ class DisplayManager:
         'disk_containers': 'inspect_container', 'image': 'inspect_image',
         'disk_images': 'inspect_image', 'volume': 'inspect_volume',
         'disk_volumes': 'inspect_volume', 'network': 'inspect_network',
-        'compose': 'compose_services',
+        'compose': 'compose_services', 'context': 'inspect_context',
     }
 
     def _on_double_click(self, event):

@@ -42,8 +42,10 @@ from src.help.help_view import build_help_tab
 from src.config.config_menu import get_menu_structure, VIEW_BUTTONS
 
 # Import utility modules
-from src.utils.utils import check_docker_installed, is_docker_running, check_terminal_installed
-from src.config.config_manager import has_saved_password, load_selected_theme, save_selected_theme
+from src.utils.utils import check_docker_installed, is_docker_running, check_terminal_installed, docker_needs_sudo
+from src.config.config_manager import (
+    has_saved_password, load_selected_theme, save_selected_theme, password_storage,
+)
 from src.ui.ui_components import (
     prompt_password_dialog,
     prompt_docker_installation,
@@ -78,10 +80,11 @@ from src.containers.dialogs import (
     open_container_terminal_dialog, view_container_logs_dialog,
 )
 from src.images.actions import delete_all_images, prune_images
-from src.images.tables import show_images, show_unused_images, show_used_images
+from src.images.tables import show_images, show_unused_images, show_used_images, show_dangling_images
 from src.images.dialogs import (
     pull_image_dialog, push_image_dialog, search_hub_dialog, build_image_dialog,
     reopen_latest_build_status_window, reopen_latest_pull_status_window, load_image_dialog,
+    import_image_dialog, registry_dialog,
 )
 from src.volumes.actions import prune_volumes, delete_used_volumes, delete_all_volumes
 from src.volumes.tables import show_volumes, show_used_volumes, show_unused_volumes
@@ -93,6 +96,10 @@ from src.compose.tables import show_compose_projects
 from src.compose.dialogs import compose_up_from_file_dialog
 from src.stats.tables import show_containers_with_stats, show_docker_disk_storage_simple
 from src.stats.dialogs import docker_disk_usage_view
+from src.system.actions import show_system_info, show_builders, prune_build_cache
+from src.system.dialogs import events_dialog
+from src.system.tables import show_contexts
+from src.ui.settings_dialog import settings_dialog
 from src.shared.context_menus import setup_table_context_menu, setup_text_context_menu
 from src.shared.item_actions import create_selected_item_actions
 
@@ -166,8 +173,9 @@ class DockerGUI:
                 self.root.destroy()
                 sys.exit(0)
 
-        # Prompt for password
-        if not prompt_password_dialog(self.root, None):
+        # Prompt for the sudo password, unless this user can already talk to Docker directly
+        # (member of the docker group): then commands run without sudo and nothing is asked
+        if docker_needs_sudo() and not prompt_password_dialog(self.root, None):
             messagebox.showerror("Error", "Sudo password is required to run this application")
             self.root.destroy()
             sys.exit(1)
@@ -346,7 +354,19 @@ class DockerGUI:
             ),
             lambda: show_containers_with_stats(self.display_manager.show_table, self.show_loading, self.display_manager),
             lambda: docker_disk_usage_view(self.display_manager, self.show_loading),
-            lambda: show_docker_disk_storage_simple(self.display_manager.show_table, self.show_loading)
+            lambda: show_docker_disk_storage_simple(self.display_manager.show_table, self.show_loading),
+            lambda: show_dangling_images(self.display_manager.show_table, self.show_loading),
+            lambda: import_image_dialog(
+                self.root,
+                self.display_manager.show_text_output,
+                lambda: show_images(self.display_manager.show_table, self.show_loading),
+            ),
+            lambda: registry_dialog(self.root),
+            lambda: show_system_info(self.display_manager.show_text_output, self.show_loading),
+            lambda: show_contexts(self.display_manager.show_table, self.show_loading),
+            lambda: events_dialog(self.root),
+            lambda: show_builders(self.display_manager.show_text_output, self.show_loading),
+            lambda: prune_build_cache(self.display_manager.show_text_output, self.root, self.show_loading),
         )
         
         self.menu_structure = menu_structure
@@ -361,6 +381,7 @@ class DockerGUI:
             "Compose": "🧩",
             "Terminal": "🖥",
             "Stats": "📊",
+            "System": "⚙",
         }
         theme = themes[self.current_theme]
         for category in menu_structure.keys():
@@ -440,7 +461,7 @@ class DockerGUI:
         
         password_status = ttk.Label(
             password_frame,
-            text="● Saved" if has_saved_password() else "○ Not Saved",
+            text=(f"● Saved ({password_storage()})" if has_saved_password() else "○ Not Saved"),
             font=("Arial", 8)
         )
         password_status.pack(pady=2)
@@ -457,6 +478,12 @@ class DockerGUI:
         btn_del_pw.pack(side=tk.LEFT, padx=2, pady=2)
         Tooltip(btn_del_pw, SIDEBAR_BOTTOM_TOOLTIPS["delete_password"])
 
+        # Settings button
+        btn_settings = ttk.Button(bottom_frame, text="⚙ Settings", style="secondary.TButton",
+                                  command=lambda: settings_dialog(self.root))
+        btn_settings.pack(fill=tk.X, pady=(6, 0))
+        Tooltip(btn_settings, SIDEBAR_BOTTOM_TOOLTIPS["settings"])
+
         # Relaunch app button
         btn_relaunch = ttk.Button(bottom_frame, text="🔄 Relaunch App", style="secondary.TButton",
                                   command=self.relaunch_app)
@@ -471,6 +498,7 @@ class DockerGUI:
         # Action toolbar frame
         self.btn_frame = ttk.LabelFrame(main_frame, text="Select a category from the sidebar", padding=(10, 8))
         self.btn_frame.pack(fill=tk.X, pady=(0, 6))
+        self.btn_frame.bind("<Configure>", self._layout_toolbar)
 
         # Status bar: result of the last action (packed before the content so it stays visible)
         self.status_label = ttk.Label(main_frame, text="Ready", style="Muted.TLabel",
@@ -719,6 +747,7 @@ class DockerGUI:
         tw = self.display_manager.table_widget
         tw.tag_configure('oddrow', background=theme["tree_odd"])
         tw.tag_configure('evenrow', background=theme["tree_even"])
+        self.display_manager.apply_status_colors()
         
         # Reapply cell-border / grid-line treeview styling for new theme
         self._configure_treeview_grid(theme)
@@ -813,7 +842,8 @@ class DockerGUI:
         _WARN_WORDS = ("stop",)
         _SUCCESS_WORDS = ("start", "run", "pull")
 
-        max_cols = 12
+        self._toolbar_buttons = []
+        self._toolbar_cols = None
         for i, (text, cmd) in enumerate(buttons):
             def make_command(command, btn_text):
                 def wrapper():
@@ -858,7 +888,7 @@ class DockerGUI:
             
             btn = ttk.Button(self.btn_frame, text=text, style=init_style,
                              command=make_command(cmd, text))
-            btn.grid(row=i // max_cols, column=i % max_cols, padx=4, pady=1)
+            self._toolbar_buttons.append(btn)
             self.category_buttons[text] = btn
             enable_button_enter_key(btn)
             tip_text = CATEGORY_TOOLTIPS.get(category, {}).get(text)
@@ -873,8 +903,27 @@ class DockerGUI:
                     self.display_manager.view_refresh = cmd
                 cmd()
         
-        for i in range(max_cols):
-            self.btn_frame.columnconfigure(i, weight=0)
+        self._layout_toolbar()
+    
+    def _layout_toolbar(self, _event=None):
+        """Grid the toolbar buttons with as many columns as fit the width (each column as wide as
+        its widest button), wrapping onto further rows only when the window is too narrow."""
+        buttons = [b for b in getattr(self, '_toolbar_buttons', []) if b.winfo_exists()]
+        if not buttons:
+            return
+        available = self.btn_frame.winfo_width() - 24          # frame border and padding
+        widths = [b.winfo_reqwidth() + 8 for b in buttons]     # + padx on both sides
+        cols = len(buttons)
+        if available > 1:
+            while cols > 1 and sum(max(widths[c::cols]) for c in range(cols)) > available:
+                cols -= 1
+        if (cols, len(buttons)) == self._toolbar_cols:
+            return
+        self._toolbar_cols = (cols, len(buttons))
+        for i, btn in enumerate(buttons):
+            btn.grid(row=i // cols, column=i % cols, padx=4, pady=1)
+        for c in range(len(buttons)):
+            self.btn_frame.columnconfigure(c, weight=0)
     
     def select_initial_category(self):
         """Select Docker category on startup"""
@@ -894,6 +943,7 @@ class DockerGUI:
         tw = self.display_manager.table_widget
         tw.tag_configure('oddrow', background=theme["tree_odd"])
         tw.tag_configure('evenrow', background=theme["tree_even"])
+        self.display_manager.apply_status_colors()
         self._configure_treeview_grid(theme)
     
     def relaunch_app(self):

@@ -12,7 +12,8 @@ A graphical Docker manager for Linux — control containers, images, volumes, ne
 | 💾 **Volumes** | View, create, inspect, prune, delete used/unused/all |
 | 🕸 **Networks** | View, create, inspect, connect, disconnect, prune |
 | 🧩 **Compose** | List projects, bring up from file, down, restart, logs, config |
-| 📊 **Stats** | Live container resource usage, detailed disk-usage breakdown |
+| 📊 **Stats** | Live container resource usage with CPU/memory trends, detailed disk-usage breakdown |
+| ⚙ **System** | Engine info, contexts, live events, builders, build-cache prune |
 | 💻 **Terminal** | Interactive shell inside any running container (SUDO_ASKPASS, state-checked) |
 | 📄 **Logs** | View and follow container logs with optional timestamps |
 
@@ -20,7 +21,8 @@ Other highlights:
 - **Search** — filter any table by typing
 - **Right-click** — copy cell values or entire rows
 - **Themes** — six persisted ttkbootstrap themes (Darkly, Superhero, Solar, Vapor, Cosmo, Flatly)
-- **Password manager** — sudo password stored securely in `~/.docker-gui/config.json` (0600)
+- **Password manager** — sudo password kept in the desktop keyring (`secret-tool`) when available, else in `~/.docker-gui/config.json` (0600); not asked at all if your user is in the `docker` group
+- **Registry login**, container Details / Processes / Changes / Export, image Scan / Import / Dangling, followable Compose logs, desktop notifications and a Settings dialog
 - **Sidebar status** — Docker Running ✅ / Stopped ❌ always visible
 - **Active category indicator** — theme-coloured accent strip on the active sidebar button
 - **Pull / Build status** — close the streaming window and re-open it later via the status button
@@ -61,7 +63,8 @@ docker-ui-modular/
 ├── assets/
 │   └── docker-icon.svg          # App icon
 ├── tests/
-│   └── test_buttons.py          # Unit tests (109 tests, no daemon needed)
+│   ├── test_buttons.py          # Unit tests: command constants, GUI wiring (no daemon needed)
+│   └── test_new_features.py     # Unit tests: settings, keyring, engine, events, registry, System
 └── src/
     ├── config/
     │   ├── config_manager.py    # Password / config I/O
@@ -74,11 +77,12 @@ docker-ui-modular/
     │   └── operations.py        # subprocess execution layer
     ├── containers/
     │   ├── actions.py           # Bulk container actions (start/stop/restart/delete all)
-    │   ├── dialogs.py           # File browser, terminal, logs dialogs
+    │   ├── details.py           # Readable container details (docker inspect)
+    │   ├── dialogs.py           # File browser, terminal, shared logs viewer
     │   └── tables.py            # Container Treeview population
     ├── images/
     │   ├── actions.py           # Bulk image actions (prune, delete all)
-    │   ├── dialogs.py           # Pull, push, search Hub, build, load dialogs
+    │   ├── dialogs.py           # Pull, push, registry login, search Hub, build, load, import, scan
     │   └── tables.py            # Image Treeview population
     ├── volumes/
     │   ├── actions.py           # Bulk volume actions (prune, delete used/all)
@@ -93,7 +97,11 @@ docker-ui-modular/
     │   └── tables.py            # Compose project Treeview population
     ├── stats/
     │   ├── dialogs.py           # Disk usage detail view
-    │   └── tables.py            # Stats and disk storage Treeview population
+    │   └── tables.py            # Stats (live, trends) and disk storage Treeview population
+    ├── system/
+    │   ├── actions.py           # Info, builders, prune build cache
+    │   ├── dialogs.py           # Live events window
+    │   └── tables.py            # Docker contexts
     ├── shared/
     │   ├── context_menus.py     # Right-click menus for table and text views
     │   ├── helpers.py           # Shared formatting / argument-building utilities
@@ -102,6 +110,7 @@ docker-ui-modular/
     ├── ui/
     │   ├── ui_components.py     # Reusable dialogs (password prompt, install prompt, Tooltip)
     │   ├── ui_display.py        # DisplayManager — owns the output area
+    │   ├── settings_dialog.py   # Settings dialog
     │   ├── terminal_panel.py    # Embedded terminal panel
     │   └── keyboard_navigation.py
     ├── help/
@@ -149,10 +158,10 @@ def show_my_resource(show_table_callback, show_loading_callback):
 ## Tests
 
 ```bash
-python3 -m unittest tests/test_buttons.py -v
+python3 -m unittest discover -s tests -t . -v
 ```
 
-109 unit tests cover all command constants and GUI action wiring. Uses `unittest.mock` — no real Docker daemon required.
+Unit tests cover the command constants, GUI action wiring and the newer features (settings, keyring storage, engine swap, events, registry, System). They use `unittest.mock` — no real Docker daemon required. GitHub Actions runs them (and `ruff check`) on every push.
 
 ## Uninstall
 

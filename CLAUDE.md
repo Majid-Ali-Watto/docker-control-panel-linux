@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-A Python/Tkinter GUI application for managing Docker on Linux. Provides a graphical interface for containers, images, volumes, networks, stats, Compose projects, and Docker service control. Requires sudo access for Docker commands.
+A Python/Tkinter GUI application for managing Docker on Linux. Provides a graphical interface for containers, images, volumes, networks, stats, Compose projects, system info/contexts/events, and Docker service control. Docker commands run through sudo (password asked once) unless the user can already reach Docker directly (member of the `docker` group) — then no password is asked at all.
 
 ## Running the Application
 
@@ -17,7 +17,7 @@ python3 docker_gui_modular.py
 ```
 src/
 ├── config/
-│   ├── config_manager.py      # Password storage (~/.docker-gui/config.json, mode 0600)
+│   ├── config_manager.py      # Password storage (desktop keyring via secret-tool, else ~/.docker-gui/config.json mode 0600), settings (get_setting/set_setting), theme, compose projects
 │   ├── config_menu.py         # Sidebar menu structure — all button wiring lives here
 │   ├── config_themes.py       # Theme definitions
 │   └── config_tooltips.py     # Tooltip strings for every sidebar and action button
@@ -27,12 +27,13 @@ src/
 │   └── operations.py          # Core subprocess execution: run_docker_cmd, stream_docker_cmd, show_table_command
 ├── containers/
 │   ├── actions.py             # Bulk container ops (start/stop/restart/delete all)
-│   ├── dialogs.py             # File browser, container terminal, logs dialogs
+│   ├── details.py             # format_container_details: readable state/health/restarts/ports/mounts/env from docker inspect JSON (secret-looking env values hidden)
+│   ├── dialogs.py             # File browser, container terminal, show_logs_window (shared log viewer: containers + Compose)
 │   └── tables.py              # show_all/running/stopped/paused_containers
 ├── images/
 │   ├── actions.py             # Bulk image ops (prune, delete all)
-│   ├── dialogs.py             # Pull, push, search Hub, build, load image dialogs; pull/build status
-│   └── tables.py              # show_images, show_used/unused_images
+│   ├── dialogs.py             # Pull, push, registry login/logout, search Hub, build (with --platform), load, import, vulnerability scan; pull/build status
+│   └── tables.py              # show_images, show_used/unused/dangling_images
 ├── volumes/
 │   ├── actions.py             # Bulk volume ops (prune, delete used/all)
 │   ├── dialogs.py             # Create volume dialog
@@ -46,7 +47,11 @@ src/
 │   └── tables.py              # show_compose_projects (also lists remembered projects as "not running")
 ├── stats/
 │   ├── dialogs.py             # Disk usage view: Images/Containers/Volumes/Build Cache tabs, each a DisplayManager table
-│   └── tables.py              # show_containers_with_stats, show_docker_disk_storage_simple
+│   └── tables.py              # show_containers_with_stats (Live Stats, interval button, CPU/MEM trend sparklines), show_docker_disk_storage_simple
+├── system/
+│   ├── actions.py             # show_system_info (docker version + info), show_builders (buildx), prune_build_cache
+│   ├── dialogs.py             # Live Docker events window (type / since filters, colour-coded, save)
+│   └── tables.py              # show_contexts (rows act through the 'context' table type: Use / Inspect)
 ├── shared/
 │   ├── context_menus.py       # Right-click menus for table and text output widgets
 │   ├── helpers.py             # Shared formatting / argument-building utilities
@@ -58,7 +63,8 @@ src/
 │   ├── rounded.py             # Rounded corners: ttk style images + RoundedPanel/RoundedBadge
 │   ├── datetime_picker.py     # Calendar + time picker dialog (custom date range From/To)
 │   ├── filter_popup.py        # Dropdown under the toolbar's Filters button (Created range, Apply / Clear filters)
-│   ├── cell_format.py         # format_cell: display-only tidying (dates, sizes, ports, compose files)
+│   ├── cell_format.py         # format_cell: display-only tidying (dates, sizes, ports, compose files); status_tone: unhealthy / restarting / non-zero exit → row text colour
+│   ├── settings_dialog.py     # Settings: Live Stats interval, container engine, terminal, notifications
 │   ├── popup_menu.py          # PopupMenu: padded, bordered, rounded popup used by the table's right-click menu
 │   ├── table_cells.py         # CellSelection: active table cell (outline + raw value for copying)
 │   ├── landing_page.py        # LandingPage: Docker category home (hero + status, service buttons, category cards)
@@ -73,7 +79,7 @@ src/
 │   ├── help_creator.py        # Creator + app data (name, role, links, tagline, tech stack)
 │   └── help_info.py           # HELP_SECTIONS (structured help content)
 └── utils/
-    ├── utils.py               # Docker install/running checks, run_cmd, async_run, clean_subprocess_env
+    ├── utils.py               # Docker install/running checks, engine (docker|podman) swap, docker_needs_sudo, run_cmd (optional stdin input), async_run, notify, clean_subprocess_env
     └── threads.py             # Threading helpers for async docker operations
 ```
 
@@ -95,7 +101,12 @@ Entry point: `docker_gui_modular.py` — `DockerGUI` class wires everything toge
 - **Threading**: long-running docker commands must use the helpers in `threads.py` to avoid blocking the Tkinter main loop.
 - **Tabbed tables**: `DisplayManager.show_table(..., tabs={label: callback}, active_tab=label)` draws a tab strip above the title; the Docker Disk Usage view uses it (one `disk_*` table type per tab, so search, sort, count badge and row actions come for free). Row actions accept those types through `_CONTAINER_VIEWS` / `_IMAGE_VIEWS` / `_VOLUME_VIEWS` in `item_actions.py` — only valid because the tab rows start with the same identifying columns. Relative ages (`2 weeks ago`) sort by age.
 - **Compose projects**: files picked in "Up From File" are saved to `compose_projects` in `~/.docker-gui/config.json` so a project stays listed (and can be started again) after `compose down`; entries whose files no longer exist are hidden.
-- **Password**: stored once in `~/.docker-gui/config.json` (0600). Read via `config_manager.py` — never prompt inline.
+- **Password**: asked once, then kept in the desktop keyring (`secret-tool`, libsecret) when installed, else in `~/.docker-gui/config.json` (0600); a legacy file password moves into the keyring on first load. Read via `config_manager.py` — never prompt inline. At startup `docker_needs_sudo()` (`docker info` without sudo) skips the prompt entirely for users in the `docker` group: `run_cmd`/`stream_docker_cmd` only prefix `sudo -S` when a password is set.
+- **Engine and settings**: preferences live under `settings` in the config file (`DEFAULT_SETTINGS`; Settings dialog in the sidebar). `engine` (docker|podman) is applied centrally by `utils.apply_engine`, which swaps the leading `docker` of each command at execution time — command constants stay written once and arguments (image names…) are never touched. Podman is experimental (the Docker service buttons/status still use systemd's docker). Secrets go to a command on stdin (`run_cmd(..., input_text=...)`, e.g. `docker login --password-stdin`), never into argv.
+- **Logs viewer**: `containers.dialogs.show_logs_window(root, title, save_name, fetch_command, follow_command, timestamps=True)` is the one log window (lines, follow via `stream_docker_cmd`, search, save). Containers and Compose projects only differ in the two command builders.
+- **Row status colour**: `DisplayManager._populate` tags rows of any table with a `STATUS` column through `cell_format.status_tone` (`status_bad|warn|ok` foreground tags, set by `apply_status_colors` on every theme change); details, restarts and health come from the Details row action.
+- **System category**: `src/system/` (sidebar "System"): Info, Contexts (a `context` table with Use / Inspect row actions), Events (streaming window), Builders, Prune Build Cache. Contexts do not require the local daemon check.
+- **Notifications**: `utils.notify` (notify-send) fires when a build/pull session finishes (`shared/stream.py`), only while the window is unfocused and enabled in Settings.
 - **Terminal launch**: uses `clean_subprocess_env()` from `utils.py` to strip snap-injected env vars before calling `subprocess.Popen`, preventing libpthread conflicts.
 - **Streaming sessions**: long-running streaming commands (build, pull) use `_start_stream_session` / `_show_stream_session_window` in `src/shared/stream.py` so the user can close the window and reopen the status later via a dedicated sidebar button.
 
@@ -112,7 +123,7 @@ Entry point: `docker_gui_modular.py` — `DockerGUI` class wires everything toge
 
 ## Common Tasks
 
-**Check the Commands tab data**: every command in `help_commands.py` was validated against the installed docker CLI's `--help` (subcommand path + every flag). After editing it, re-check with `docker <subcommand> --help` for new flags; placeholders (`<x>`), `$(...)` and pipes are only checked up to the first docker invocation.
+**Check the Commands tab data**: every command in `help_commands.py` was validated against the installed docker CLI's `--help` (subcommand path + every flag). After editing it, re-check with `docker <subcommand> --help` for new flags; placeholders (`<x>`), `$(...)` and pipes are only checked up to the first docker invocation. Commands that are not `docker …` constants (`trivy`, the registry-config `cat`) live in `_EXTRA_APP_COMMANDS`; `docker scout` and `docker buildx` come from plugins that may not be installed, so their flags could not be checked against `--help` locally.
 
 **Add a new Docker action button:**
 1. Add the command string to `src/docker/commands.py`.
@@ -128,16 +139,16 @@ Add an entry to the `themes` dict in `src/config/config_themes.py`.
 
 ## Security Notes
 
-- Sudo password is stored locally with `chmod 0600`; never log or print it.
+- The sudo password is kept in the desktop keyring when available, else locally with `chmod 0600`; never log or print it. Registry passwords/tokens travel on stdin only and are cleared from the dialog after use.
 - All docker commands are constructed from constants, not from raw user input — keep it that way to avoid shell injection.
 - `clean_subprocess_env()` must be used when launching external processes from within the app to avoid snap environment pollution.
 
 ## Tests
 
 ```bash
-python3 -m unittest tests/test_buttons.py -v
+python3 -m unittest discover -s tests -t . -v
 ```
 
-109 unit tests in `tests/test_buttons.py` cover all command constants and GUI action wiring. Uses `unittest.mock` with correct SOC patch targets — no real Docker daemon required.
+`tests/test_buttons.py` (command constants, GUI action wiring) and `tests/test_new_features.py` (settings, keyring/file password storage, engine swap, stdin input, sudo detection, notifications, container details, events, registry, scan, System category, trends) use `unittest.mock` with correct SOC patch targets — no real Docker daemon required. CI (`.github/workflows/ci.yml`) runs `ruff check` (pyflakes errors, see `pyproject.toml`), `compileall` and `python -m unittest discover -s tests -t .` under xvfb.
 
 **Patch path rule**: always patch where the name is bound, not where it is defined. For example, `check_docker_running` imported into `src.containers.actions` must be patched as `src.containers.actions.check_docker_running`, not `src.docker.actions.check_docker_running`. `confirm_action_dialog` is a top-level import in `src.shared.item_actions`, so tests for selected-item actions patch `src.shared.item_actions.confirm_action_dialog`.

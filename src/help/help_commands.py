@@ -23,6 +23,11 @@ _DISPLAY_OVERRIDES = {
                             "-v <host_path>:<container_path> --network <network> <image> <command>"),
     "DOCKER_NETWORK_CREATE": "docker network create --driver <driver> [--subnet <cidr>] <name>",
     "DOCKER_CONTAINER_LOGS": "docker logs [-t] --tail <lines> <container>",
+    "DOCKER_CONTAINER_LOGS_FOLLOW": "docker logs [-t] --tail <lines> --follow <container>",
+    "DOCKER_EVENTS": ("docker events --since <time> [--filter type=<type>] "
+                      "--format '{{.Time}}\\t{{.Type}}\\t{{.Action}}\\t{{.Actor.ID}}\\t{{.Actor.Attributes.name}}'"),
+    "DOCKER_LOGIN": "docker login -u <username> --password-stdin [<registry>]",
+    "DOCKER_LOGOUT": "docker logout [<registry>]",
 }
 
 _DESCRIPTIONS = {
@@ -30,6 +35,16 @@ _DESCRIPTIONS = {
     "DOCKER_DISK_STORAGE_SIMPLE": "Disk usage summary (Stats → Docker Disk Storage)",
     "DOCKER_DISK_USAGE_VERBOSE": "Detailed disk usage per image, container and volume (Disk Usage tabs)",
     "DOCKER_SYSTEM_PRUNE": "Remove stopped containers, dangling images and unused networks",
+    "DOCKER_INFO": "Daemon and host details: storage driver, cgroups, root dir (System → Info)",
+    "DOCKER_VERSION": "Client and server versions (System → Info)",
+    "DOCKER_BUILDX_LS": "List buildx builders and their platforms (System → Builders)",
+    "DOCKER_BUILDER_PRUNE": "Remove the build cache (System → Prune Build Cache)",
+    # Contexts
+    "DOCKER_CONTEXT_LS": "List contexts: local and remote engines (System → Contexts)",
+    "DOCKER_CONTEXT_USE": "Switch the active context (System → Contexts → Use)",
+    "DOCKER_CONTEXT_INSPECT": "Show a context's details (System → Contexts → Inspect)",
+    # Events
+    "DOCKER_EVENTS": "Stream daemon events live (System → Events)",
     # Container lists
     "DOCKER_PS_RUNNING": "List running containers (Containers → Running)",
     "DOCKER_PS_ALL": "List all containers (Containers → All)",
@@ -57,11 +72,16 @@ _DESCRIPTIONS = {
     "DOCKER_CONTAINER_COMMIT": "Create an image from a container",
     "DOCKER_CONTAINER_INSPECT": "Show a container's details (JSON)",
     "DOCKER_CONTAINER_LOGS": "Show a container's last log lines (Logs, optionally with timestamps)",
+    "DOCKER_CONTAINER_LOGS_FOLLOW": "Follow a container's logs live (Logs → Follow)",
+    "DOCKER_CONTAINER_TOP": "List the processes running in a container (Processes)",
+    "DOCKER_CONTAINER_DIFF": "Files a container added, changed or deleted (Changes)",
+    "DOCKER_CONTAINER_EXPORT": "Export a container's filesystem to a tar file (Export)",
     "DOCKER_EXEC_LS": "List a folder inside a container (file browser)",
     "DOCKER_CP_FROM": "Copy a file from a container to this machine (file browser)",
     "DOCKER_CP_TO": "Copy a file from this machine into a container (file browser)",
     # Images
     "DOCKER_IMAGES_ALL": "List images (Images → All)",
+    "DOCKER_IMAGES_DANGLING": "List untagged (dangling) images (Images → Dangling)",
     "DOCKER_IMAGES_IDS_ALL": "IDs of all images (used by the bulk actions)",
     "DOCKER_RMI_ALL": "Force-remove every image (Images → Delete All)",
     "DOCKER_RMI_ALL_SAFE": "Remove every image, ignoring errors (Docker → Clean All)",
@@ -70,6 +90,8 @@ _DESCRIPTIONS = {
     "DOCKER_IMAGE_TAG": "Add a tag to an image",
     "DOCKER_IMAGE_SAVE": "Save an image to a tar file",
     "DOCKER_IMAGE_LOAD": "Load an image from a tar file (Images → Load)",
+    "DOCKER_IMAGE_IMPORT": "Create an image from an exported container tar (Images → Import)",
+    "DOCKER_SCOUT_CVES": "Scan an image for known vulnerabilities (Scan; trivy is used when scout is missing)",
     "DOCKER_IMAGE_BUILD": "Build an image from a Dockerfile (Images → Build)",
     "DOCKER_IMAGE_HISTORY": "Show an image's layer history",
     "DOCKER_IMAGE_INSPECT": "Show an image's details (JSON)",
@@ -103,11 +125,15 @@ _DESCRIPTIONS = {
     "DOCKER_COMPOSE_DOWN_VOLUMES": "Down, and also remove the project's named volumes",
     "DOCKER_COMPOSE_RESTART": "Restart a project's services",
     "DOCKER_COMPOSE_LOGS": "Show a project's last log lines",
+    "DOCKER_COMPOSE_LOGS_FOLLOW": "Follow a project's logs live (Compose Logs → Follow)",
     "DOCKER_COMPOSE_CONFIG": "Show the final merged Compose configuration",
     # Inspect
     "DOCKER_INSPECT_IMAGE": "Get the image ID a container was created from",
     "DOCKER_INSPECT_MOUNTS": "Get a container's mounts as JSON (used to find its volumes)",
     "DOCKER_INSPECT_ANCESTOR": "IDs of containers created from an image (used by Stop Using / Delete)",
+    # Registry
+    "DOCKER_LOGIN": "Log in to a registry; the password is sent on stdin (Images → Registry)",
+    "DOCKER_LOGOUT": "Log out of a registry (Images → Registry)",
     # Pull / push
     "DOCKER_PULL": "Download an image (Images → Pull)",
     "DOCKER_IMAGE_PUSH": "Upload an image to a registry (Images → Push)",
@@ -124,6 +150,7 @@ _EXTRA_APP_COMMANDS = {
         ("systemctl stop docker.socket docker.service", "Stop the Docker service (Docker → Stop)"),
         ("systemctl restart docker.socket docker.service", "Restart the Docker service (Docker → Restart)"),
         ("which docker", "Check that Docker is installed at startup"),
+        ("docker info --format '{{.ServerVersion}}'", "Check whether sudo is needed at all (user is in the docker group)"),
         ("sudo -S <command>", "How every command above is run: the saved sudo password is sent on stdin"),
     ],
     "Container actions": [
@@ -133,6 +160,12 @@ _EXTRA_APP_COMMANDS = {
     ],
     "Compose": [
         ("docker rm -f <container_ids>", "Remove leftover containers of a Compose project"),
+    ],
+    "Registry": [
+        ('cat "${DOCKER_CONFIG:-$HOME/.docker}/config.json"', "Read which registries are logged in (Images → Registry)"),
+    ],
+    "Images": [
+        ("trivy image <image>", "Vulnerability scan when docker scout is not installed (Images → Scan)"),
     ],
     "Install Docker": [
         ("sudo apt-get install -y docker-ce docker-ce-cli containerd.io", "Install Docker Engine (install prompt)"),
@@ -146,7 +179,7 @@ _GROUP_TITLES = {   # commands.py section comment -> title shown in the tab
     "System": "System", "Container list": "Container lists", "Container stats": "Container stats",
     "Container actions": "Container actions", "Image": "Images", "Volume": "Volumes",
     "Network": "Networks", "Compose": "Compose", "Inspect": "Inspect", "Pull / push": "Pull / push / search",
-    "Run": "Run",
+    "Run": "Run", "Context": "Contexts", "Events": "Events", "Registry": "Registry",
 }
 
 
