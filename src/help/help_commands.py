@@ -93,7 +93,6 @@ COMMAND_SECTIONS = [
         ("docker volume rm <name>", "Remove a volume"),
         ("docker volume rm $(docker volume ls -q)", "Remove every volume"),
         ("docker volume prune -f", "Remove all unused volumes"),
-        ("docker system df -v", "Show verbose disk usage per volume"),
     ]),
     ("NETWORKS", [
         ("docker network ls", "List all networks"),
@@ -124,7 +123,7 @@ COMMAND_SECTIONS = [
     ]),
     ("SYSTEM", [
         ("docker system df", "Show disk usage by images, containers, volumes"),
-        ("docker system df -v", "Verbose disk usage breakdown"),
+        ("docker system df -v", "Verbose disk usage breakdown (per image, container and volume)"),
         ("docker system prune -f", "Remove stopped containers, dangling images and unused networks"),
         ("docker system prune -a", "Also remove unused images (not just dangling)"),
         ("docker system prune -a --volumes", "Full cleanup including unused volumes"),
