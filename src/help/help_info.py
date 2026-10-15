@@ -100,24 +100,3 @@ HELP_SECTIONS = [
         ("p", "The app disables X input-method support at start (XMODIFIERS=@im=none). With ibus, every widget made startup and screen changes take seconds. The only side effect is that ibus compose (e.g. CJK input) is unavailable inside this app."),
     ]),
 ]
-
-# Shown in the output area of the Docker page until an action is run
-docker_landing_info = """
-  DOCKER SERVICE
-
-  Start      Start docker.socket and docker.service
-  Stop       Stop the Docker service and its socket
-  Restart    Restart the Docker service
-  Clean All  Stop and delete every container, image
-             and volume (asks for confirmation)
-
-  The service status is shown at the top of the sidebar.
-
-  GETTING AROUND
-
-  • Pick Containers, Images, Volumes, Networks, Compose
-    or Stats in the sidebar to list and manage them.
-  • Select rows, then use the action buttons below the table.
-  • The Commands tab on the right lists docker commands
-    you can click to copy or download.
-"""

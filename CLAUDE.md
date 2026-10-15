@@ -61,6 +61,7 @@ src/
 │   ├── cell_format.py         # format_cell: display-only tidying (dates, sizes, ports, compose files)
 │   ├── popup_menu.py          # PopupMenu: padded, bordered, rounded popup used by the table's right-click menu
 │   ├── table_cells.py         # CellSelection: active table cell (outline + raw value for copying)
+│   ├── landing_page.py        # LandingPage: Docker category home (hero + status, service buttons, category cards)
 │   ├── scroll_frame.py        # ScrollFrame: scrolling container (wheel, wrap-to-width labels, theme-aware canvas)
 │   ├── terminal_panel.py      # Embedded terminal panel
 │   └── keyboard_navigation.py # Keyboard shortcuts and focus management
@@ -68,8 +69,9 @@ src/
 │   ├── help_commands.py       # COMMAND_SECTIONS (single source of the command reference) + commands_as_text()
 │   ├── commands_view.py       # Commands tab: searchable list + category chips, per-row Copy, Copy all / Download (rows built in batches)
 │   ├── help_view.py           # Help tab: searchable collapsible cards rendered from help_info.HELP_SECTIONS
-│   ├── help_creator.py        # Creator name, links shown in Creator tab
-│   └── help_info.py           # HELP_SECTIONS (structured help content) + docker_landing_info
+│   ├── creator_view.py        # Creator tab: profile card, link cards (Open / Copy), About card with tech chips
+│   ├── help_creator.py        # Creator + app data (name, role, links, tagline, tech stack)
+│   └── help_info.py           # HELP_SECTIONS (structured help content)
 └── utils/
     ├── utils.py               # Docker install/running checks, run_cmd, async_run, clean_subprocess_env
     └── threads.py             # Threading helpers for async docker operations
@@ -81,7 +83,7 @@ Entry point: `docker_gui_modular.py` — `DockerGUI` class wires everything toge
 
 - **SOC by sidebar category** — each sidebar category (Containers, Images, Volumes, Networks, Compose, Stats) has its own `src/<category>/` directory with `actions.py`, `tables.py`, and `dialogs.py`. Docker service operations live in `src/docker/`. Shared infrastructure lives in `src/shared/`.
 - **No top header bar** — the window is split directly into sidebar (left) + main content (right). The sidebar shows the app title and Docker service status at the top.
-- **Docker info panel** — a dark banner shown below the action toolbar when the Docker category is active (`DockerGUI._create_docker_info_panel`). Hidden for all other categories.
+- **Landing page** — the Docker category opens on `ui/landing_page.LandingPage` (a child of the output container, packed by `DockerGUI.show_category_buttons`): hero with the service status, Start/Stop/Restart/Clean All buttons (the Docker entries of `get_menu_structure()`), and one card per sidebar category that opens it. Any view shown through `DisplayManager` hides it; clicking Docker in the sidebar brings it back. Cards are built after first paint.
 - **DisplayManager** (`src/ui/ui_display.py`): single object that owns the output area; call `show_table(columns, rows)` or `show_text_output(text)` — never manipulate output widgets directly.
 - **Reloadable lists**: `VIEW_BUTTONS` in `config_menu.py` lists the toolbar buttons that switch the visible list. The last one clicked is remembered in `DisplayManager.view_refresh` so row actions can reload the list in place. Add new list buttons there (the toolbar layout itself is a single row of buttons).
 - **Table header / filters**: `DisplayManager._build_header` builds the title + count badge, then one toolbar (search, sort dropdown + Asc/Desc, and a "☰ Filters" button) with identically sized controls. The button opens `filter_popup.FilterPopup` under it: "Created" preset, From/To fields (typed `YYYY-MM-DD[ HH:MM]` or the `datetime_picker.py` calendar via "Pick…", shown only for "Custom range"), and Apply / Clear filters; edits only take effect on Apply, and Clear filters also empties the search box. The button is highlighted while any filter is active and only exists for tables with a date column. A column named `CREATED` (docker `{{.CreatedAt}}`, last column — keep row indexes used by `item_actions.py` stable) enables the date filter; Volumes and Compose have none (search only; Esc clears it). Columns are sized from measured text widths.
@@ -98,7 +100,7 @@ Entry point: `docker_gui_modular.py` — `DockerGUI` class wires everything toge
 - **Streaming sessions**: long-running streaming commands (build, pull) use `_start_stream_session` / `_show_stream_session_window` in `src/shared/stream.py` so the user can close the window and reopen the status later via a dedicated sidebar button.
 
 - **Startup speed (XIM)**: `docker_gui_modular.py` sets `XMODIFIERS=@im=none` before Tk starts. With an XIM server (ibus) Tk's `XCreateIC` costs ~90 ms per call, which made first paint ~11 s and every screen slow; `clean_subprocess_env()` strips it for child processes. Keep that line above the first Tk call.
-- **Window / landing**: the window opens maximised (`_maximize`, `-zoomed`). The Docker page shows `docker_landing_info` (`help_info.py`) in the output area until an action runs.
+- **Window / landing**: the window opens maximised (`_maximize`, `-zoomed`). The Docker page opens on the landing page above.
 
 ## Coding Conventions
 
