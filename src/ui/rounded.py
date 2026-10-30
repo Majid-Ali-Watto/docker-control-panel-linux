@@ -29,8 +29,23 @@ BUTTON_PALETTE = {}             # style name -> {state: (fill, text)} as actuall
 _tk_colors = []                 # (widget, {"bg"/"fg": colour}) for widgets built by make()
 
 
+def _rgb(color):
+    """(r, g, b) of any Tk colour. Pillow parses #hex and CSS names; Tk's own names (Windows reports
+    plain ttk widgets as "SystemButtonFace", X11 has "gray50") only Tk can resolve."""
+    try:
+        return tuple(ImageColor.getrgb(color)[:3])
+    except ValueError:
+        root = tk._default_root
+        if root is None:
+            raise
+        try:
+            return tuple(round(v / 257) for v in root.winfo_rgb(color))
+        except tk.TclError as exc:
+            raise ValueError(f"unknown color specifier: {color!r}") from exc
+
+
 def _luminance(color):
-    r, g, b = [v / 255 for v in ImageColor.getrgb(color)[:3]]
+    r, g, b = [v / 255 for v in _rgb(color)]
     lin = lambda v: v / 12.92 if v <= 0.03928 else ((v + 0.055) / 1.055) ** 2.4
     return 0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b)
 
@@ -46,7 +61,7 @@ def _hex(rgb):
 
 
 def _blend(a, b, t):
-    ra, rb = ImageColor.getrgb(a)[:3], ImageColor.getrgb(b)[:3]
+    ra, rb = _rgb(a), _rgb(b)
     return _hex([x + (y - x) * t for x, y in zip(ra, rb)])
 
 
@@ -88,6 +103,10 @@ def _rgba(color):
         return (0, 0, 0, 0)
     try:
         return ImageColor.getcolor(color, "RGBA")
+    except ValueError:
+        pass
+    try:
+        return (*_rgb(color), 255)
     except ValueError:
         return (0, 0, 0, 0)
 

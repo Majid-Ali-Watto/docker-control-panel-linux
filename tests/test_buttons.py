@@ -2009,7 +2009,9 @@ class TestFormatCell(unittest.TestCase):
         self.assertEqual(self.fmt("STATUS", "running(2), exited(1)"), "running (2), exited (1)")
         self.assertEqual(self.fmt("STATUS", "Exited (137) 25 hours ago"), "Exited (137) 25 hours ago")
         home = os.path.expanduser("~")
-        self.assertEqual(self.fmt("CONFIG FILES", f"{home}/a/x.yml,/tmp/y.yml"), "~/a/x.yml, /tmp/y.yml")
+        inside = os.path.join("a", "x.yml")
+        self.assertEqual(self.fmt("CONFIG FILES", f"{os.path.join(home, inside)},/tmp/y.yml"),
+                         f"~/{inside}, /tmp/y.yml")
 
 
 class TestPopupMenu(_Base):
