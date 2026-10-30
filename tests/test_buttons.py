@@ -11,6 +11,7 @@ Run with:
 """
 
 import sys
+import json
 import unittest
 from unittest.mock import patch, MagicMock
 
@@ -539,7 +540,8 @@ class TestComposeRetainedProjects(_Base):
         with tempfile.TemporaryDirectory() as d:
             f = os.path.join(d, 'docker-compose.yml')
             open(f, 'w').close()
-            rows = self._rows([[f]], '[{"Name":"x","Status":"running(1)","ConfigFiles":"%s"}]' % f)
+            listed = json.dumps([{"Name": "x", "Status": "running(1)", "ConfigFiles": f}])   # paths may hold backslashes
+            rows = self._rows([[f]], listed)
         self.assertEqual([r[0] for r in rows], ['x'])
 
     def test_saved_project_with_missing_files_hidden(self):
@@ -1682,6 +1684,9 @@ class TestDateFilterAndSort(_TableFixture):
         self.assertEqual(len(self._names()), 3)
 
     def _open_popup(self):
+        # a popup owned by a withdrawn window is never mapped on Windows, so show the window like a user sees it
+        self.root.deiconify()
+        self.root.update()
         self.dm._filter_btn.invoke()
         popup = self.dm._filter_popup
         popup.update()
