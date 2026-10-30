@@ -114,8 +114,9 @@ class TestPasswordStorage(_ConfigDir):
             self.assertEqual(self.file_config()["password"], "s3cret")
             self.assertEqual(cm.load_saved_password(), "s3cret")
             self.assertEqual(cm.password_storage(), "file")
-        mode = (self.dir / "config.json").stat().st_mode & 0o777
-        self.assertEqual(mode, 0o600)
+        if os.name != "nt":                      # POSIX file modes do not exist on Windows
+            mode = (self.dir / "config.json").stat().st_mode & 0o777
+            self.assertEqual(mode, 0o600)
 
     def test_legacy_file_password_moves_to_keyring(self):
         (self.dir / "config.json").write_text(json.dumps({"password": "old", "theme": "darkly"}))
@@ -974,3 +975,25 @@ class TestSettingsDialog(_ConfigDir, _Base):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestTkColourNames(unittest.TestCase):
+    """Windows reports plain ttk widgets as "SystemButtonFace"; Pillow cannot parse Tk's own names."""
+
+    def setUp(self):
+        import tkinter as tk
+        self.root = tk.Tk()
+        self.addCleanup(self.root.destroy)
+
+    def test_names_only_tk_knows_are_resolved(self):
+        from src.ui import rounded
+        self.assertEqual(rounded._rgb("gray50"), (127, 127, 127))          # X11 name Pillow lacks
+        self.assertEqual(rounded._rgb("#102030"), (16, 32, 48))
+        self.assertGreater(rounded.contrast("gray50", "#ffffff"), 1)
+        self.assertEqual(rounded._rgba("gray50"), (127, 127, 127, 255))
+
+    def test_unknown_colour_is_still_a_value_error(self):
+        from src.ui import rounded
+        with self.assertRaises(ValueError):
+            rounded._rgb("definitely-not-a-colour")
+        self.assertEqual(rounded._rgba("definitely-not-a-colour"), (0, 0, 0, 0))
