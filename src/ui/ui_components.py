@@ -3,9 +3,13 @@ UI Components Module
 Reusable UI components and dialogs.
 """
 
-import tkinter as tk
-from tkinter import ttk, messagebox
+import shutil
 import subprocess
+import tkinter as tk
+import webbrowser
+from tkinter import ttk, messagebox
+
+from src.utils import platform_utils as plat, terminals
 
 
 class Tooltip:
@@ -151,6 +155,40 @@ def prompt_password_dialog(root, on_success_callback):
     return True
 
 
+# Linux: install Docker with whichever package manager this distribution has
+_LINUX_INSTALL_DOCKER = [
+    "echo 'Installing Docker...'",
+    "if command -v apt-get >/dev/null; then sudo apt-get update && sudo apt-get install -y docker.io;"
+    " elif command -v dnf >/dev/null; then sudo dnf install -y moby-engine;"
+    " elif command -v pacman >/dev/null; then sudo pacman -S --needed --noconfirm docker;"
+    " elif command -v zypper >/dev/null; then sudo zypper --non-interactive install docker;"
+    " else echo 'No supported package manager - see https://docs.docker.com/engine/install/'; fi",
+    "sudo systemctl enable --now docker",
+    "echo 'Docker installation complete! Please restart this application.'",
+    "echo 'Press Enter to close...'",
+    "read",
+]
+
+
+def _docker_install_script():
+    """Script lines that install Docker on this OS, or None when it is a manual download (no
+    package manager to drive: Homebrew on macOS, winget on Windows)."""
+    if plat.IS_MAC:
+        if shutil.which("brew"):
+            return ["echo 'Installing Docker Desktop...'", "(brew install --cask docker-desktop || brew install --cask docker) && open -a Docker",
+                    "echo 'Docker Desktop is starting. Finish its first-run setup, then restart this application.'",
+                    "echo 'Press Enter to close...'", "read"]
+        return None
+    if plat.IS_WIN:
+        if shutil.which("winget"):
+            return ["@echo off", "echo Installing Docker Desktop...",
+                    "winget install -e --id Docker.DockerDesktop --accept-source-agreements --accept-package-agreements",
+                    "echo.", "echo Docker Desktop installed. Restart Windows if asked, start Docker Desktop,",
+                    "echo then restart this application.", "pause"]
+        return None
+    return _LINUX_INSTALL_DOCKER
+
+
 def prompt_docker_installation():
     """Show error and prompt for Docker installation"""
     response = messagebox.askyesno(
@@ -158,68 +196,23 @@ def prompt_docker_installation():
         "Docker is not installed on your system.\n\nWould you like to install Docker?",
         icon='error'
     )
-    
-    if response:
-        # Open terminal with Docker installation commands
-        # Detect the terminal emulator
-        terminal_commands = [
-            "gnome-terminal",
-            "konsole",
-            "xfce4-terminal",
-            "xterm",
-            "terminator",
-            "tilix"
-        ]
-        
-        # Installation commands for Ubuntu/Debian
-        install_commands = (
-            "echo 'Installing Docker...'; "
-            "sudo apt-get update && "
-            "sudo apt-get install -y apt-transport-https ca-certificates curl software-properties-common && "
-            "curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo apt-key add - && "
-            "sudo add-apt-repository 'deb [arch=amd64] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable' && "
-            "sudo apt-get update && "
-            "sudo apt-get install -y docker-ce docker-ce-cli containerd.io && "
-            "sudo systemctl start docker && "
-            "sudo systemctl enable docker && "
-            "echo 'Docker installation complete! Please restart this application.'; "
-            "exec bash"
-        )
-        
-        terminal_found = False
-        for terminal in terminal_commands:
-            try:
-                # Check if terminal exists
-                check_result = subprocess.run(
-                    ["which", terminal],
-                    capture_output=True
-                )
-                if check_result.returncode == 0:
-                    # Open terminal with installation commands
-                    if terminal == "gnome-terminal":
-                        subprocess.Popen([terminal, "--", "bash", "-c", install_commands])
-                    elif terminal == "konsole":
-                        subprocess.Popen([terminal, "-e", "bash", "-c", install_commands])
-                    elif terminal in ["xfce4-terminal", "terminator", "tilix"]:
-                        subprocess.Popen([terminal, "-e", f"bash -c '{install_commands}'"])
-                    else:  # xterm or fallback
-                        subprocess.Popen([terminal, "-e", f"bash -c '{install_commands}'"])
-                    terminal_found = True
-                    break
-            except (FileNotFoundError, OSError, subprocess.SubprocessError):
-                continue
-        
-        if not terminal_found:
-            messagebox.showwarning(
-                "Terminal Not Found",
-                "Could not find a terminal emulator.\n\n"
-                "Please install Docker manually using:\n\n"
-                "sudo apt-get update\n"
-                "sudo apt-get install docker.io\n"
-                "sudo systemctl start docker\n"
-                "sudo systemctl enable docker"
-            )
-    
+    if not response:
+        return False
+
+    lines = _docker_install_script()
+    if lines is None:
+        webbrowser.open_new_tab(plat.DOCKER_DESKTOP_URL)
+        messagebox.showinfo("Install Docker Desktop",
+                            f"Download and install Docker Desktop from:\n\n{plat.DOCKER_DESKTOP_URL}\n\n"
+                            "then restart this application.")
+        return False
+
+    script = terminals.write_script(lines)
+    ok, _error = terminals.launch(script, "Install Docker")
+    if not ok:
+        messagebox.showwarning(
+            "Terminal Not Found",
+            "Could not open a terminal.\n\nInstall Docker manually: https://docs.docker.com/get-docker/")
     return False
 
 

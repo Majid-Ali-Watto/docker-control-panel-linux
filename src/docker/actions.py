@@ -3,8 +3,11 @@ Docker Actions Module
 High-level Docker service actions and bulk container/image/volume/network operations.
 """
 
+import time
+
+from src.utils import platform_utils as plat
 from src.utils.threads import startThreadForTask
-from src.utils.utils import is_docker_running, run_cmd, async_run
+from src.utils.utils import is_docker_running, docker_service_active, run_cmd, async_run
 from src.config.config_manager import get_sudo_password
 from tkinter import messagebox
 from src.docker.commands import (
@@ -26,56 +29,57 @@ def check_docker_running():
 
 def update_docker_status(root, status_var):
     """Update Docker service status"""
-    import subprocess
-    status = subprocess.run(
-        "systemctl is-active docker",
-        shell=True,
-        capture_output=True,
-        text=True
-    )
-    if status.stdout.strip() == "active":
+    if docker_service_active():
         status_var.set("Docker Status: Running ✅")
     else:
         status_var.set("Docker Status: Stopped ❌")
 
 
-def start_docker_service(root, status_var, show_loading_callback, show_text_output_callback):
-    """Start Docker service"""
+def _wait_for_docker(up, seconds):
+    """Poll until the daemon is up (or down), up to `seconds`; Docker Desktop takes a while to boot."""
+    for _ in range(seconds):
+        if docker_service_active() == up:
+            return
+        time.sleep(1)
+
+
+def _run_service_action(action):
+    """Start / stop / restart the Docker daemon with whatever this OS uses; the result text."""
+    manager = plat.service_manager()
+    if manager == "systemd":
+        return run_cmd(f"systemctl {action} docker.socket docker.service",
+                       sudo=True, sudo_password=get_sudo_password())
+    if manager == "desktop":
+        result = plat.docker_desktop_action(action)
+        _wait_for_docker(action != "stop", 120)
+        return result
+    return plat.no_service_manager_text(action)
+
+
+def _service_task(action, title, settle, root, status_var, show_loading_callback, show_text_output_callback):
     def task():
         show_loading_callback(True)
-        result = run_cmd("systemctl start docker.socket docker.service", sudo=True, sudo_password=get_sudo_password())
+        result = _run_service_action(action)
         show_loading_callback(False)
-        show_text_output_callback(f"Start Docker Result:\n{result}")
-        import time
-        time.sleep(1)
+        show_text_output_callback(f"{title} Docker Result:\n{result}")
+        time.sleep(settle)
         root.after(0, lambda: root.winfo_exists() and update_docker_status(root, status_var))
     startThreadForTask(task)
+
+
+def start_docker_service(root, status_var, show_loading_callback, show_text_output_callback):
+    """Start Docker service"""
+    _service_task("start", "Start", 1, root, status_var, show_loading_callback, show_text_output_callback)
 
 
 def stop_docker_service(root, status_var, show_loading_callback, show_text_output_callback):
     """Stop Docker service"""
-    def task():
-        show_loading_callback(True)
-        result = run_cmd("systemctl stop docker.socket docker.service", sudo=True, sudo_password=get_sudo_password())
-        show_loading_callback(False)
-        show_text_output_callback(f"Stop Docker Result:\n{result}")
-        import time
-        time.sleep(1)
-        root.after(0, lambda: root.winfo_exists() and update_docker_status(root, status_var))
-    startThreadForTask(task)
+    _service_task("stop", "Stop", 1, root, status_var, show_loading_callback, show_text_output_callback)
 
 
 def restart_docker_service(root, status_var, show_loading_callback, show_text_output_callback):
     """Restart Docker service"""
-    def task():
-        show_loading_callback(True)
-        result = run_cmd("systemctl restart docker.socket docker.service", sudo=True, sudo_password=get_sudo_password())
-        show_loading_callback(False)
-        show_text_output_callback(f"Restart Docker Result:\n{result}")
-        import time
-        time.sleep(2)
-        root.after(0, lambda: root.winfo_exists() and update_docker_status(root, status_var))
-    startThreadForTask(task)
+    _service_task("restart", "Restart", 2, root, status_var, show_loading_callback, show_text_output_callback)
 
 
 def confirm_and_run(msg, cmd, show_text_output_callback, sudo=False, parent=None, show_loading_callback=None):

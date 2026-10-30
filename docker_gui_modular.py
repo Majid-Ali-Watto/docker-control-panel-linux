@@ -11,19 +11,17 @@ import os
 import glob
 import webbrowser
 
-# Tk creates an X input-method context (XCreateIC) for many widgets, and with an XIM server
-# such as ibus (XMODIFIERS=@im=ibus) every one is a ~90 ms round trip: ~11 s to first paint
-# and slow screens. This panel needs no input-method composition, so opt out before Tk starts.
-os.environ["XMODIFIERS"] = "@im=none"
+from src.utils import platform_utils
+
+# Before the first Tk call: platform setup (Linux: opt out of X input methods, which made first paint
+# ~11 s; Windows: DPI awareness; macOS / Windows: put Docker's bin folders on PATH)
+platform_utils.prepare_environment()
 
 # Prefer venv packages so ttkbootstrap uses the correct Pillow version
-_venv_pkgs = glob.glob(
-    os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                 '.venv', 'lib', 'python*', 'site-packages')
-)
-for _p in _venv_pkgs:
-    if _p not in sys.path:
-        sys.path.insert(0, _p)
+for _pattern in platform_utils.venv_site_packages_globs():
+    for _p in glob.glob(os.path.join(os.path.dirname(os.path.abspath(__file__)), _pattern)):
+        if _p not in sys.path:
+            sys.path.insert(0, _p)
 
 import tkinter as tk
 from tkinter import ttk, messagebox
@@ -42,6 +40,7 @@ from src.help.help_view import build_help_tab
 from src.config.config_menu import get_menu_structure, VIEW_BUTTONS
 
 # Import utility modules
+from src.utils import terminals
 from src.utils.utils import check_docker_installed, is_docker_running, check_terminal_installed, docker_needs_sudo
 from src.config.config_manager import (
     has_saved_password, load_selected_theme, save_selected_theme, password_storage,
@@ -165,7 +164,7 @@ class DockerGUI:
                 "The Container Terminal feature requires a terminal emulator,\n"
                 "but none was found on your system.\n\n"
                 "Install one with:\n"
-                "    sudo apt install tilix\n\n"
+                f"    {terminals.install_hint()}\n\n"
                 "Continue without terminal support?",
                 icon="warning",
             )
@@ -204,10 +203,13 @@ class DockerGUI:
 
     def _maximize(self):
         """Open maximised (title bar kept); the geometry above is the restored size."""
-        try:
-            self.root.attributes("-zoomed", True)      # X11 / Wayland (Linux)
-        except tk.TclError:
-            self.root.state("zoomed")                  # Windows / macOS
+        if platform_utils.IS_LINUX:
+            try:
+                self.root.attributes("-zoomed", True)  # X11 / Wayland
+                return
+            except tk.TclError:
+                pass
+        self.root.state("zoomed")                      # Windows / macOS
 
     def setup_styles(self):
         """Setup TTK styles via ttkbootstrap"""
@@ -455,28 +457,29 @@ class DockerGUI:
         bottom_frame = ttk.Frame(parent)
         bottom_frame.pack(side=tk.BOTTOM, fill=tk.X, padx=10, pady=10)
         
-        # Password management
-        password_frame = ttk.LabelFrame(bottom_frame, text="🔑 Password", padding=5)
-        password_frame.pack(fill=tk.X, pady=(0, 8))
+        # Password management (sudo exists on Linux only; Docker Desktop never asks for one)
+        if platform_utils.uses_sudo():
+            password_frame = ttk.LabelFrame(bottom_frame, text="🔑 Password", padding=5)
+            password_frame.pack(fill=tk.X, pady=(0, 8))
         
-        password_status = ttk.Label(
-            password_frame,
-            text=(f"● Saved ({password_storage()})" if has_saved_password() else "○ Not Saved"),
-            font=("Arial", 8)
-        )
-        password_status.pack(pady=2)
+            password_status = ttk.Label(
+                password_frame,
+                text=(f"● Saved ({password_storage()})" if has_saved_password() else "○ Not Saved"),
+                font=("Arial", 8)
+            )
+            password_status.pack(pady=2)
         
-        pw_btn_row = ttk.Frame(password_frame)
-        pw_btn_row.pack()
-        btn_change = ttk.Button(pw_btn_row, text="Change", style="secondary.TButton",
-                                command=lambda: change_password_dialog(self.root), width=8)
-        btn_change.pack(side=tk.LEFT, padx=2, pady=2)
-        Tooltip(btn_change, SIDEBAR_BOTTOM_TOOLTIPS["change_password"])
+            pw_btn_row = ttk.Frame(password_frame)
+            pw_btn_row.pack()
+            btn_change = ttk.Button(pw_btn_row, text="Change", style="secondary.TButton",
+                                    command=lambda: change_password_dialog(self.root), width=8)
+            btn_change.pack(side=tk.LEFT, padx=2, pady=2)
+            Tooltip(btn_change, SIDEBAR_BOTTOM_TOOLTIPS["change_password"])
 
-        btn_del_pw = ttk.Button(pw_btn_row, text="Delete", style="danger.Outline.TButton",
-                                command=delete_password_dialog, width=8)
-        btn_del_pw.pack(side=tk.LEFT, padx=2, pady=2)
-        Tooltip(btn_del_pw, SIDEBAR_BOTTOM_TOOLTIPS["delete_password"])
+            btn_del_pw = ttk.Button(pw_btn_row, text="Delete", style="danger.Outline.TButton",
+                                    command=delete_password_dialog, width=8)
+            btn_del_pw.pack(side=tk.LEFT, padx=2, pady=2)
+            Tooltip(btn_del_pw, SIDEBAR_BOTTOM_TOOLTIPS["delete_password"])
 
         # Settings button
         btn_settings = ttk.Button(bottom_frame, text="⚙ Settings", style="secondary.TButton",

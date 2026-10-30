@@ -9,6 +9,8 @@ import shutil
 import subprocess
 from pathlib import Path
 
+from src.utils import platform_utils as plat
+
 # Configuration constants
 CONFIG_DIR = Path.home() / ".docker-gui"
 CONFIG_FILE = CONFIG_DIR / "config.json"
@@ -44,8 +46,8 @@ _KEYRING_ATTRS = ["service", "docker-gui", "kind", "sudo-password"]
 
 
 def keyring_available():
-    """True when `secret-tool` (libsecret) is installed."""
-    return shutil.which("secret-tool") is not None
+    """True when `secret-tool` (libsecret) is installed (Linux; the password is only ever stored there)."""
+    return plat.IS_LINUX and shutil.which("secret-tool") is not None
 
 
 def _keyring(*args, input_text=None):

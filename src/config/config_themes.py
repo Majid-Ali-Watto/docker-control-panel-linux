@@ -3,7 +3,7 @@ Theme configurations for Docker GUI (powered by ttkbootstrap)
 """
 
 # Default theme name used on startup
-DEFAULT_THEME = "Flatly"
+DEFAULT_THEME = "Darkly"
 
 themes = {
     "Darkly": {

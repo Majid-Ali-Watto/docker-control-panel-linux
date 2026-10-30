@@ -149,9 +149,10 @@ _EXTRA_APP_COMMANDS = {
         ("systemctl start docker.socket docker.service", "Start the Docker service (Docker → Start)"),
         ("systemctl stop docker.socket docker.service", "Stop the Docker service (Docker → Stop)"),
         ("systemctl restart docker.socket docker.service", "Restart the Docker service (Docker → Restart)"),
+        ("docker desktop start|stop|restart", "Control Docker Desktop (macOS / Windows: the Start / Stop / Restart buttons)"),
         ("which docker", "Check that Docker is installed at startup"),
         ("docker info --format '{{.ServerVersion}}'", "Check whether sudo is needed at all (user is in the docker group)"),
-        ("sudo -S <command>", "How every command above is run: the saved sudo password is sent on stdin"),
+        ("sudo -S <command>", "How every command above is run on Linux: the saved sudo password is sent on stdin (never on macOS / Windows)"),
     ],
     "Container actions": [
         ("docker exec -it <container> /bin/sh", "Open a shell inside a container (Terminal action)"),

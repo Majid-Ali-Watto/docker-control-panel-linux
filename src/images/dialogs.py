@@ -9,11 +9,13 @@ import threading
 import urllib.request
 import urllib.error
 import json
+import os
 import re
 from tkinter import simpledialog
 
 from src.docker.actions import check_docker_running
 from src.config.config_manager import get_sudo_password
+from src.utils import platform_utils as plat
 from src.utils.utils import run_cmd
 from src.utils.threads import startThreadForTask
 from src.docker.operations import run_docker_cmd
@@ -580,6 +582,20 @@ def scan_image(root, image, show_text_output_callback, show_loading_callback=Non
 _DOCKER_CONFIG_CAT = "sh -c 'cat \"${DOCKER_CONFIG:-$HOME/.docker}/config.json\" 2>/dev/null'"
 
 
+def read_docker_config():
+    """Text of docker's config.json. POSIX reads it through the same shell/sudo context as the login
+    (root's file when sudo is used); Windows has no `sh`, and the file there is the user's own."""
+    if not plat.IS_WIN:
+        return run_cmd(_DOCKER_CONFIG_CAT, sudo=True, sudo_password=get_sudo_password())
+    path = os.path.join(os.environ.get("DOCKER_CONFIG") or os.path.join(os.path.expanduser("~"), ".docker"),
+                        "config.json")
+    try:
+        with open(path, encoding="utf-8") as handle:
+            return handle.read()
+    except OSError:
+        return ""
+
+
 def parse_registries(config_text):
     """Registries listed under "auths" in a docker config.json (empty when unreadable)."""
     try:
@@ -648,8 +664,7 @@ def registry_dialog(root):
 
     def refresh_registries():
         def task():
-            text = run_cmd(_DOCKER_CONFIG_CAT, sudo=True, sudo_password=get_sudo_password())
-            names = parse_registries(text)
+            names = parse_registries(read_docker_config())
             dialog.after(0, lambda: set_registries(names))
         startThreadForTask(task)
 

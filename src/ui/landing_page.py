@@ -8,6 +8,7 @@ from tkinter import ttk
 
 from src.ui.rounded import RoundedPanel, make
 from src.ui.scroll_frame import ScrollFrame
+from src.utils import platform_utils as plat
 
 HERO_BG, HERO_TITLE, HERO_TEXT = "#0d1117", "#4ea8f7", "#8a9fb5"
 _CARD_MIN_WIDTH = 230
@@ -77,7 +78,9 @@ class LandingPage(ttk.Frame):
         for label, callback in service_actions:
             ttk.Button(frame, text=label, style=_SERVICE_STYLES.get(label, "secondary.TButton"),
                        command=callback, width=11).pack(side=tk.LEFT, padx=(0, 8))
-        ttk.Label(frame, text="Needs sudo — the saved password is used.", style="Muted.TLabel",
+        note = ("Needs sudo — the saved password is used." if plat.uses_sudo()
+                else "Controls Docker Desktop.")
+        ttk.Label(frame, text=note, style="Muted.TLabel",
                   font=("Arial", 8)).pack(side=tk.RIGHT)
 
     def _card(self, parent, category, icon, description):

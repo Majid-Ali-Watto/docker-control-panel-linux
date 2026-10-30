@@ -9,44 +9,14 @@ import shutil
 import subprocess
 import threading
 from src.config.config_manager import get_setting
+from src.utils import platform_utils as plat, shell, terminals
+from src.utils.platform_utils import clean_subprocess_env   # noqa: F401  (re-exported: callers import it from here)
 from src.utils.threads import startThreadForTask
-
-# Terminals tried in preference order
-_KNOWN_TERMINALS = [
-    'tilix', 'gnome-terminal', 'x-terminal-emulator',
-    'xfce4-terminal', 'konsole', 'mate-terminal', 'terminator', 'xterm',
-]
-
-
-def clean_subprocess_env():
-    """Return os.environ with snap-injected overrides stripped.
-
-    When the app runs inside VS Code (snap), GTK/GIO/GDK vars point at
-    snap-internal paths that break system binaries like tilix/gnome-terminal
-    with a libpthread symbol error.  Removing them lets each binary find its
-    own runtime libraries from the system prefix.
-    """
-    _DROP = {
-        'GDK_PIXBUF_MODULEDIR', 'GDK_PIXBUF_MODULE_FILE',
-        'GIO_MODULE_DIR', 'GSETTINGS_SCHEMA_DIR',
-        'GTK_EXE_PREFIX', 'GTK_IM_MODULE_FILE', 'GTK_PATH',
-        'LOCPATH', 'GIO_LAUNCHED_DESKTOP_FILE',
-    }
-    env = {k: v for k, v in os.environ.items()
-           if k not in _DROP and 'SNAP' not in k}
-    # The app opts out of X input methods for itself; child programs should not inherit that
-    if env.get('XMODIFIERS') == '@im=none':
-        del env['XMODIFIERS']
-    # Strip snap dirs from PATH
-    env['PATH'] = ':'.join(
-        p for p in env.get('PATH', '').split(':') if '/snap/' not in p
-    ) or '/usr/bin:/usr/local/bin:/bin'
-    return env
 
 
 def installed_terminals():
     """Terminal emulators found on this system, in preference order."""
-    return [term for term in _KNOWN_TERMINALS if shutil.which(term)]
+    return terminals.installed_terminals()
 
 
 def check_terminal_installed():
@@ -91,10 +61,22 @@ def check_docker_installed():
     return shutil.which(engine()) is not None
 
 
-def is_docker_running():
-    """Check if Docker service is running (Podman has no daemon, so it always is)"""
-    if engine() != "docker":
-        return True
+def _engine_answers(name, timeout=15):
+    """True when `<name> info` reaches a running daemon as this user (no shell, so it behaves the
+    same on every OS)."""
+    try:
+        result = subprocess.run([name, "info", "--format", "{{.ServerVersion}}"], capture_output=True,
+                                text=True, timeout=timeout, **plat.popen_flags())
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return result.returncode == 0 and bool(result.stdout.strip())
+
+
+def docker_service_active():
+    """Whether the Docker daemon is up: systemd's view on Linux, else whether `docker info` answers
+    (Docker Desktop on macOS / Windows has no systemd unit)."""
+    if plat.service_manager() != "systemd":
+        return _engine_answers("docker", timeout=5)
     status = subprocess.run(
         "systemctl is-active docker",
         shell=True,
@@ -104,9 +86,19 @@ def is_docker_running():
     return status.stdout.strip() == "active"
 
 
+def is_docker_running():
+    """Check if Docker service is running (Podman has no daemon, so it always is)"""
+    if engine() != "docker":
+        return True
+    return docker_service_active()
+
+
 def docker_needs_sudo():
     """False when the current user can talk to the container engine directly (member of the
-    `docker` group, rootless engine, ...), so no sudo password is needed for it."""
+    `docker` group, rootless engine, Docker Desktop on macOS / Windows ...), so no sudo password
+    is needed for it."""
+    if not plat.uses_sudo():
+        return False
     try:
         result = subprocess.run(f"{engine()} info --format '{{{{.ServerVersion}}}}'", shell=True,
                                 capture_output=True, text=True, timeout=15)
@@ -115,10 +107,50 @@ def docker_needs_sudo():
     return result.returncode != 0 or not result.stdout.strip()
 
 
+# PowerShell balloon notification; the text comes through the environment, never into the script
+_WIN_TOAST = (
+    "Add-Type -AssemblyName System.Windows.Forms; Add-Type -AssemblyName System.Drawing; "
+    "$n = New-Object System.Windows.Forms.NotifyIcon; $n.Icon = [System.Drawing.SystemIcons]::Information; "
+    "$n.BalloonTipTitle = $env:DCP_TITLE; $n.BalloonTipText = $env:DCP_MESSAGE; $n.Visible = $true; "
+    "$n.ShowBalloonTip(5000); Start-Sleep -Seconds 6; $n.Dispose()"
+)
+
+
+def notification_hint():
+    """Why notices cannot be shown here (and how to fix it), or None when they can."""
+    if notification_command("", "") is not None:
+        return None
+    if plat.IS_WIN:
+        return "PowerShell was not found, so no notices are shown."
+    if plat.IS_MAC:
+        return "osascript was not found, so no notices are shown."
+    return "notify-send is not installed (sudo apt install libnotify-bin), so no notices are shown."
+
+
+def notification_command(title, message):
+    """(argv, extra environment) that shows a desktop notice on this OS, or None without a way to."""
+    if plat.IS_MAC:
+        if not shutil.which("osascript"):
+            return None
+        def quoted(text):
+            return '"' + text.replace("\\", "\\\\").replace('"', '\\"') + '"'
+        return ["osascript", "-e", f"display notification {quoted(message)} with title {quoted(title)}"], {}
+    if plat.IS_WIN:
+        powershell = shutil.which("powershell") or shutil.which("pwsh")
+        if not powershell:
+            return None
+        return ([powershell, "-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden", "-Command", _WIN_TOAST],
+                {"DCP_TITLE": title, "DCP_MESSAGE": message})
+    if shutil.which("notify-send") is None:
+        return None
+    return ["notify-send", "--app-name=Docker Control Panel", title, message], {}
+
+
 def notify(title, message, root=None):
-    """Desktop notification (notify-send) when enabled in Settings; skipped while the app window
+    """Desktop notification when enabled in Settings; skipped while the app window
     has focus (`root`), since the user is already looking at the result."""
-    if not get_setting("notifications") or shutil.which("notify-send") is None:
+    command = notification_command(title, message) if get_setting("notifications") else None
+    if command is None:
         return False
     if root is not None:
         try:
@@ -126,9 +158,10 @@ def notify(title, message, root=None):
                 return False
         except Exception:
             pass
+    argv, extra_env = command
     try:
-        subprocess.Popen(["notify-send", "--app-name=Docker Control Panel", title, message],
-                         env=clean_subprocess_env(), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        subprocess.Popen(argv, env={**clean_subprocess_env(), **extra_env},
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, **plat.popen_flags())
     except OSError:
         return False
     return True
@@ -138,7 +171,9 @@ def run_cmd(cmd, sudo=False, sudo_password=None, input_text=None):
     """Run a shell command and return output. `input_text` is fed to the command's stdin (after
     the sudo password, which sudo reads first) — used to pass secrets without putting them in argv."""
     cmd = apply_engine(cmd)
-    if sudo and sudo_password:
+    if plat.IS_WIN:
+        return shell.output(cmd, input_text)    # no POSIX shell there; no sudo either
+    if sudo and sudo_password and plat.uses_sudo():
         # Use sudo with -S flag to read password from stdin
         process = subprocess.Popen(
             f"sudo -S {cmd}",
