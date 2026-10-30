@@ -86,7 +86,7 @@ python3 -m unittest discover -s tests -t . -v    # needs a display (xvfb-run -a 
 tests/distro_smoke.sh ubuntu:20.04               # installer on a real distro image (needs docker)
 ```
 
-Everything is mocked with `unittest.mock` — no live Docker daemon required. Patch where a name is *bound* (e.g. `src.containers.actions.check_docker_running`). CI runs Python 3.8 – 3.13 and 14 distribution images.
+Everything is mocked with `unittest.mock` — no live Docker daemon required. Patch where a name is *bound* (e.g. `src.containers.actions.check_docker_running`). CI is manual (`workflow_dispatch`): lint and the installer tests run only for the options and images ticked in the "Run workflow" form. Do not run tests for every image or every change.
 
 ## Patterns to Follow
 

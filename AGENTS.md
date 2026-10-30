@@ -186,7 +186,7 @@ python3 -m unittest discover -s tests -t . -v     # needs a display (xvfb-run -a
 tests/distro_smoke.sh ubuntu:20.04 fedora:latest  # the installer on real distro images (needs docker)
 ```
 
-No real Docker daemon is needed — all docker calls are mocked with `unittest.mock.patch`. CI runs the suite on Python 3.8 – 3.13 and the installer on 14 distribution images.
+No real Docker daemon is needed — all docker calls are mocked with `unittest.mock.patch`. CI is manual (`workflow_dispatch`): lint and the installer tests run only for the options and distribution images ticked in the "Run workflow" form. Do not run the tests for every image or every change — only for the images the task needs.
 
 **Patch path rule**: patch where the name is bound, not where it is defined.
 - `check_docker_running` imported into `src.containers.actions` → patch `src.containers.actions.check_docker_running`

@@ -108,7 +108,7 @@ It detects your distribution and installs the system packages through its packag
 - **Docker service**: enabled and started with systemd, OpenRC, runit or SysV, whichever the system uses.
 - **NixOS** and **immutable systems** (Silverblue, SteamOS …) cannot be installed into in place; the installer says what to do instead.
 
-Tested on real images of Ubuntu 20.04 – 24.04, Debian 12, Fedora, Rocky / Alma 8 and 9, Amazon Linux 2023, Arch, openSUSE Leap and Tumbleweed, Alpine and Void (`tests/distro_smoke.sh`, also run in CI).
+Tested on real images of Ubuntu 20.04 – 24.04, Debian 12, Fedora, Rocky / Alma 8 and 9, Amazon Linux 2023, Arch, openSUSE Leap and Tumbleweed, Alpine and Void (`tests/distro_smoke.sh`, run from the manual CI workflow).
 
 ## Running
 
@@ -140,7 +140,7 @@ docker-ui-modular/
 │   ├── test_linux_compat.py     # Unit tests: init systems, service buttons, status, terminals, old Pythons
 │   ├── test_home_page.py        # Unit tests: "How it works" card, home-page tooltips, creator details, images
 │   ├── test_legal.py            # Unit tests: Privacy / Terms text, first-run acceptance, reader, home links
-│   └── distro_smoke.sh          # Runs the installer on real distro images (docker needed; also used by CI)
+│   └── distro_smoke.sh          # Runs the installer on real distro images (docker needed; used by the manual CI workflow)
 └── src/
     ├── config/
     │   ├── config_manager.py    # Password / config I/O
@@ -244,7 +244,7 @@ def show_my_resource(show_table_callback, show_loading_callback):
 python3 -m unittest discover -s tests -t . -v
 ```
 
-Unit tests cover the command constants, GUI action wiring and the newer features (settings, keyring storage, engine swap, events, registry, System). They use `unittest.mock` — no real Docker daemon required. GitHub Actions runs them (and `ruff check`) on Python 3.8 – 3.13, and runs the installer on 14 distribution images, on every push.
+Unit tests cover the command constants, GUI action wiring and the newer features (settings, keyring storage, engine swap, events, registry, System). They use `unittest.mock` — no real Docker daemon required. GitHub Actions does not run on push: start the **CI** workflow by hand from the Actions tab and tick whether to lint, whether to test, and which distribution images to test the installer on.
 
 ## Privacy and Terms
 
