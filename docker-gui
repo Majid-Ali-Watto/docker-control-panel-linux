@@ -1,6 +1,19 @@
 #!/bin/bash
 
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+# Resolve this file's real directory: it is also reached through the ~/.local/bin/docker-gui
+# symlink (BSD readlink on older macOS has no -f, so follow the links by hand)
+SOURCE="${BASH_SOURCE[0]:-$0}"
+while [ -L "$SOURCE" ]; do
+    DIR="$(cd -P "$(dirname "$SOURCE")" && pwd)"
+    SOURCE="$(readlink "$SOURCE")"
+    case "$SOURCE" in /*) ;; *) SOURCE="$DIR/$SOURCE" ;; esac
+done
+SCRIPT_DIR="$(cd -P "$(dirname "$SOURCE")" && pwd)"
+
+if [ ! -x "$SCRIPT_DIR/.venv/bin/python" ]; then
+    echo "Docker Control Panel is not installed yet. Run: $SCRIPT_DIR/install.sh" >&2
+    exit 1
+fi
 
 exec "$SCRIPT_DIR/.venv/bin/python" \
-    "$SCRIPT_DIR/docker_gui_modular.py"
+    "$SCRIPT_DIR/docker_gui_modular.py" "$@"

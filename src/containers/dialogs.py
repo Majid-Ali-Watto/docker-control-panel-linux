@@ -14,6 +14,7 @@ from src.docker.actions import check_docker_running
 from src.config.config_manager import get_sudo_password
 from src.docker.commands import DOCKER_CONTAINER_LOGS, DOCKER_CONTAINER_LOGS_FOLLOW
 from src.docker.operations import stream_docker_cmd, cancel_stream
+from src.utils import platform_utils as plat, terminals
 from src.utils.utils import run_cmd, clean_subprocess_env, check_terminal_installed, engine
 from src.utils.threads import startThreadForTask
 from src.shared.helpers import _quote
@@ -303,7 +304,7 @@ def open_container_terminal_dialog(root, display_manager):
         return
 
     askpass_path = None
-    if sudo_pw:
+    if sudo_pw and plat.uses_sudo():
         with tempfile.NamedTemporaryFile(mode='w', suffix='.sh', delete=False) as ap:
             ap.write('#!/bin/bash\n')
             ap.write(f'echo {_quote(sudo_pw)}\n')
@@ -314,89 +315,47 @@ def open_container_terminal_dialog(root, display_manager):
         docker_prefix = ''
 
     cid_q = _quote(container_id)
-    with tempfile.NamedTemporaryFile(mode='w', suffix='.sh', delete=False) as script_file:
-        script_file.write('#!/bin/bash\n')
-        script_file.write(f'echo -ne "\\033]0;{container_name} ({container_id[:12]})\\007"\n')
-        prompt = f'{container_name}({container_id[:12]})# '
-        script_file.write(f'{docker_prefix}{engine()} exec -it {cid_q} /bin/bash -c \'PS1="{prompt}" exec /bin/bash\' 2>/dev/null || \\\n')
-        script_file.write(f'{docker_prefix}{engine()} exec -it {cid_q} /bin/sh -c \'PS1="{prompt}" exec /bin/sh\'\n')
-        if askpass_path:
-            script_file.write(f'rm -f {_quote(askpass_path)}\n')
-        script_file.write('echo ""\n')
-        script_file.write('echo "Press Enter to close..."\n')
-        script_file.write('read\n')
-        script_path = script_file.name
-
-    os.chmod(script_path, 0o755)
-
     title = f'{container_name} ({container_id[:12]})'
+    prompt = f'{container_name}({container_id[:12]})# '
+    if plat.IS_WIN:
+        # cmd.exe batch file: bash when the image has it, else sh; then wait so errors stay readable
+        shell_line = '/bin/sh -c "if [ -x /bin/bash ]; then exec /bin/bash; else exec /bin/sh; fi"'
+        script_lines = [
+            '@echo off',
+            f'title {title}',
+            f'{engine()} exec -it {container_id} {shell_line}',
+            'echo.',
+            'pause',
+        ]
+    else:
+        script_lines = [
+            f'echo -ne "\\033]0;{container_name} ({container_id[:12]})\\007"',
+            f'{docker_prefix}{engine()} exec -it {cid_q} /bin/bash -c \'PS1="{prompt}" exec /bin/bash\' 2>/dev/null || \\',
+            f'{docker_prefix}{engine()} exec -it {cid_q} /bin/sh -c \'PS1="{prompt}" exec /bin/sh\'',
+        ]
+        if askpass_path:
+            script_lines.append(f'rm -f {_quote(askpass_path)}')
+        script_lines += ['echo ""', 'echo "Press Enter to close..."', 'read']
+    script_path = terminals.write_script(script_lines)
 
-    terminals = [
-        ('tilix', ['tilix', '--title', title, '-e', script_path]),
-        ('gnome-terminal', ['gnome-terminal', '--title', title, '--', 'bash', script_path]),
-        ('x-terminal-emulator', ['x-terminal-emulator', '-title', title, '-e', script_path]),
-        ('xfce4-terminal', ['xfce4-terminal', '--title', title, '-e', script_path]),
-        ('konsole', ['konsole', '-p', f'tabtitle={title}', '-e', script_path]),
-        ('mate-terminal', ['mate-terminal', '--title', title, '-e', script_path]),
-        ('terminator', ['terminator', '-T', title, '-x', script_path]),
-        ('xterm', ['xterm', '-title', title, '-e', script_path]),
-    ]
+    success, last_error = terminals.launch(script_path, title, preferred=check_terminal_installed())
 
-    preferred = check_terminal_installed()
-    terminals.sort(key=lambda entry: entry[0] != preferred)   # stable: the Settings choice goes first
-
-    success = False
-    last_error = None
-
-    for term_name, term_cmd in terminals:
-        check_cmd = term_cmd[2] if term_cmd[0] == 'env' else term_cmd[0]
-        if not shutil.which(check_cmd):
-            continue
-
-        try:
-            process = subprocess.Popen(
-                term_cmd,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                start_new_session=True,
-                cwd=os.path.expanduser('~'),
-                env=clean_subprocess_env(),
-            )
-
-            try:
-                retcode = process.wait(timeout=0.5)
-                if retcode != 0:
-                    stderr = process.stderr.read().decode('utf-8', errors='ignore')
-                    last_error = f"{term_name}: exited with code {retcode}"
-                    if stderr:
-                        last_error += f" - {stderr[:100]}"
-                    continue
-                success = True
-            except subprocess.TimeoutExpired:
-                success = True
-
-            if success:
-                def cleanup_script():
-                    import time
-                    time.sleep(3)
+    if success:
+        def cleanup_script():
+            import time
+            time.sleep(10 if plat.IS_MAC else 3)   # Terminal.app opens the file a moment after `open` returns
+            for path in (script_path, askpass_path):
+                if path:
                     try:
-                        os.unlink(script_path)
+                        os.unlink(path)
                     except Exception:
                         pass
-                    if askpass_path:
-                        try:
-                            os.unlink(askpass_path)
-                        except Exception:
-                            pass
-                threading.Thread(target=cleanup_script, daemon=True).start()
-                break
-
-        except FileNotFoundError:
-            last_error = f"{term_name}: not found"
-            continue
-        except Exception as e:
-            last_error = f"{term_name}: {str(e)}"
-            continue
+        threading.Thread(target=cleanup_script, daemon=True).start()
+    elif askpass_path:
+        try:
+            os.unlink(askpass_path)
+        except OSError:
+            pass
 
     if not success:
         try:
@@ -424,7 +383,7 @@ def open_container_terminal_dialog(root, display_manager):
 
             ttk.Label(error_frame, text="\n💡 Install a terminal emulator:",
                      font=("Arial", 9, "bold"), foreground=readable_color("blue")).pack(anchor='w', pady=(10, 0))
-            install_cmd = "sudo apt install tilix  # or xfce4-terminal, gnome-terminal"
+            install_cmd = terminals.install_hint()
             install_text = tk.Text(error_frame, height=1, font=("Courier New", 9), wrap=tk.NONE,
                                   bg="#f0f0f0", relief=tk.FLAT)
             install_text.pack(fill=tk.X, pady=2)

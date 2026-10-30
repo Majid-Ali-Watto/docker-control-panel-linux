@@ -87,6 +87,21 @@ def _table_cb():
 # Base test class
 # ---------------------------------------------------------------------------
 
+
+_PLATFORM_PATCHERS = []
+
+
+def setUpModule():
+    from tests import pretend_linux
+    _PLATFORM_PATCHERS.extend(pretend_linux())
+
+
+def tearDownModule():
+    for patcher in _PLATFORM_PATCHERS:
+        patcher.stop()
+    _PLATFORM_PATCHERS.clear()
+
+
 class _Base(unittest.TestCase):
     def setUp(self):
         self.root = tk.Tk()

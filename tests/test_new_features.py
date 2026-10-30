@@ -4,6 +4,7 @@ features. Like test_buttons.py they need no Docker daemon: docker is mocked wher
 """
 
 import json
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -12,6 +13,21 @@ from unittest.mock import patch, MagicMock
 from tests.test_buttons import _Base, _TableFixture, _F_CONTAINER, _F_IMAGE, FAKE_PW
 
 from src.config import config_manager as cm
+
+
+
+_PLATFORM_PATCHERS = []
+
+
+def setUpModule():
+    from tests import pretend_linux
+    _PLATFORM_PATCHERS.extend(pretend_linux())
+
+
+def tearDownModule():
+    for patcher in _PLATFORM_PATCHERS:
+        patcher.stop()
+    _PLATFORM_PATCHERS.clear()
 
 
 class _ConfigDir(unittest.TestCase):
@@ -168,6 +184,7 @@ class TestEngine(unittest.TestCase):
 
 class TestRunCmdInput(unittest.TestCase):
 
+    @unittest.skipIf(os.name == "nt", "needs the POSIX `cat`")
     def test_input_reaches_stdin_without_sudo(self):
         from src.utils.utils import run_cmd
         self.assertEqual(run_cmd("cat", input_text="hello"), "hello")

@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-A Python/Tkinter GUI application for managing Docker on Linux. Provides a graphical interface for containers, images, volumes, networks, stats, Compose projects, system info/contexts/events, and Docker service control. Docker commands run through sudo (password asked once) unless the user can already reach Docker directly (member of the `docker` group) — then no password is asked at all.
+A Python/Tkinter GUI application for managing Docker on Linux, macOS and Windows. Provides a graphical interface for containers, images, volumes, networks, stats, Compose projects, system info/contexts/events, and Docker service control. On Linux, Docker commands run through sudo (password asked once) unless the user can already reach Docker directly (member of the `docker` group) — then no password is asked at all. On macOS / Windows Docker Desktop runs as the user, so sudo and the password are never used.
 
 ## Running the Application
 
@@ -79,9 +79,25 @@ src/
 │   ├── help_creator.py        # Creator + app data (name, role, links, tagline, tech stack)
 │   └── help_info.py           # HELP_SECTIONS (structured help content)
 └── utils/
-    ├── utils.py               # Docker install/running checks, engine (docker|podman) swap, docker_needs_sudo, run_cmd (optional stdin input), async_run, notify, clean_subprocess_env
+    ├── utils.py               # Docker install/running checks (docker_service_active), engine (docker|podman) swap, docker_needs_sudo, run_cmd (optional stdin input), async_run, notify (notification_command per OS)
+    ├── platform_utils.py      # IS_LINUX/IS_MAC/IS_WIN, uses_sudo, prepare_environment (XIM opt-out, DPI, PATH), popen_flags, clean_subprocess_env, service_manager + Docker Desktop control
+    ├── shell.py               # Windows only: runs the command strings without a shell (shlex parser: $(...), 2>/dev/null, || true)
+    ├── terminals.py           # Terminal emulators per OS: installed_terminals, write_script, launch
     └── threads.py             # Threading helpers for async docker operations
 ```
+
+Install: `install.sh` (Linux + macOS) and `install.ps1` / `install.bat` (Windows) are the single-command installers. Linux: detects apt/dnf/pacman/zypper, installs python3+tkinter+venv, Docker and a terminal. macOS: Homebrew (bootstrapped), python@3.12 + python-tk@3.12 (the system Tk is 8.5), Docker Desktop cask, an `.app` bundle in `~/Applications`. Windows: winget for Python 3.12 + Docker Desktop, Start Menu shortcut, `docker-gui.cmd` shim in `%LOCALAPPDATA%\Microsoft\WindowsApps`. All build `.venv` from `requirements.txt` (rebuilt if its imports fail). `docker-gui` follows its own symlink by hand (BSD `readlink` has no `-f`) and runs `.venv/bin/python`; `docker-gui.cmd` runs `pythonw`. `install.sh` must stay bash 3.2-safe (macOS): guard empty arrays under `set -u`, no `${var,,}`. `install.ps1` must stay ASCII-only (Windows PowerShell 5.1). New third-party imports must be added to `requirements.txt`.
+
+## Platform layer
+
+Everything OS-specific goes through `src/utils/platform_utils.py` (flags, `uses_sudo()`, `service_manager()` = `systemd` | `desktop` | `None`), `terminals.py` and `shell.py`; other modules never test the OS themselves. Read the flags as `platform_utils.IS_WIN` (module attribute, never `from … import IS_WIN`) so tests switch OS with one patch (`tests/test_platforms.py`). Rules:
+
+- **POSIX (Linux + macOS)** keep `shell=True` with the command strings as written. **Windows** has no POSIX shell: `run_cmd` / `stream_docker_cmd` go through `shell.popen/output`, which `shlex.split`s the string (every argument is already `shlex.quote`d) and supports only `$(...)`, `2>/dev/null` and `|| true`. A new command constant must not need pipes, `&&`, `;` or redirections — `test_every_command_constant_parses_without_a_shell` enforces it.
+- **sudo / password** (Linux only): the password UI, keyring and `sudo -S` prefix are skipped when `uses_sudo()` is False.
+- **Service buttons**: `docker.actions._run_service_action` — systemctl (Linux), `docker desktop start|stop|restart` with an `open -a` / `osascript` / `taskkill` fallback (macOS / Windows), or an explanation when there is no systemd. Status is `utils.docker_service_active()` (systemd, else `docker info`).
+- **Terminals / notifications**: `terminals.write_script` + `launch` (bash script on Linux/macOS `.command`, `.cmd` on Windows); `utils.notification_command` (notify-send / osascript / PowerShell balloon with the text passed through the environment).
+- **Tk**: wheel bindings (`<Button-4/5>` only on Linux), `-zoomed` only on Linux, `XMODIFIERS` only on Linux, console windows hidden with `popen_flags()`.
+
 
 Entry point: `docker_gui_modular.py` — `DockerGUI` class wires everything together.
 
@@ -106,12 +122,12 @@ Entry point: `docker_gui_modular.py` — `DockerGUI` class wires everything toge
 - **Logs viewer**: `containers.dialogs.show_logs_window(root, title, save_name, fetch_command, follow_command, timestamps=True)` is the one log window (lines, follow via `stream_docker_cmd`, search, save). Containers and Compose projects only differ in the two command builders.
 - **Row status colour**: `DisplayManager._populate` tags rows of any table with a `STATUS` column through `cell_format.status_tone` (`status_bad|warn|ok` foreground tags, set by `apply_status_colors` on every theme change); details, restarts and health come from the Details row action.
 - **System category**: `src/system/` (sidebar "System"): Info, Contexts (a `context` table with Use / Inspect row actions), Events (streaming window), Builders, Prune Build Cache. Contexts do not require the local daemon check.
-- **Notifications**: `utils.notify` (notify-send) fires when a build/pull session finishes (`shared/stream.py`), only while the window is unfocused and enabled in Settings.
-- **Terminal launch**: uses `clean_subprocess_env()` from `utils.py` to strip snap-injected env vars before calling `subprocess.Popen`, preventing libpthread conflicts.
+- **Notifications**: `utils.notify` (notify-send / osascript / PowerShell) fires when a build/pull session finishes (`shared/stream.py`), only while the window is unfocused and enabled in Settings.
+- **Terminal launch**: `terminals.launch` uses `clean_subprocess_env()` (re-exported by `utils.py`) to strip snap-injected env vars before calling `subprocess.Popen` on Linux, preventing libpthread conflicts.
 - **Streaming sessions**: long-running streaming commands (build, pull) use `_start_stream_session` / `_show_stream_session_window` in `src/shared/stream.py` so the user can close the window and reopen the status later via a dedicated sidebar button.
 
-- **Startup speed (XIM)**: `docker_gui_modular.py` sets `XMODIFIERS=@im=none` before Tk starts. With an XIM server (ibus) Tk's `XCreateIC` costs ~90 ms per call, which made first paint ~11 s and every screen slow; `clean_subprocess_env()` strips it for child processes. Keep that line above the first Tk call.
-- **Window / landing**: the window opens maximised (`_maximize`, `-zoomed`). The Docker page opens on the landing page above.
+- **Startup speed (XIM)**: `platform_utils.prepare_environment()` (called by `docker_gui_modular.py` before Tk starts, Linux only) sets `XMODIFIERS=@im=none`. With an XIM server (ibus) Tk's `XCreateIC` costs ~90 ms per call, which made first paint ~11 s and every screen slow; `clean_subprocess_env()` strips it for child processes. Keep that call above the first Tk call.
+- **Window / landing**: the window opens maximised (`_maximize`: `-zoomed` on Linux, `state('zoomed')` on Windows / macOS). The Docker page opens on the landing page above.
 
 ## Coding Conventions
 
@@ -119,7 +135,8 @@ Entry point: `docker_gui_modular.py` — `DockerGUI` class wires everything toge
 - `ttk` widgets preferred over `tk` widgets.
 - Fonts: `JetBrains Mono` for monospace output, `Arial` for labels.
 - Keep modules in their respective `src/` subdirectory; do not add top-level Python files.
-- Do not mock or simulate docker commands — the app shells out to real `docker` and `sudo`.
+- Do not mock or simulate docker commands — the app shells out to real `docker` (and `sudo` on Linux).
+- Never call `os.killpg`, `start_new_session`, `systemctl`, `notify-send`, `secret-tool` or a terminal emulator outside the platform layer / their one module.
 
 ## Common Tasks
 
@@ -149,6 +166,8 @@ Add an entry to the `themes` dict in `src/config/config_themes.py`.
 python3 -m unittest discover -s tests -t . -v
 ```
 
-`tests/test_buttons.py` (command constants, GUI action wiring) and `tests/test_new_features.py` (settings, keyring/file password storage, engine swap, stdin input, sudo detection, notifications, container details, events, registry, scan, System category, trends) use `unittest.mock` with correct SOC patch targets — no real Docker daemon required. CI (`.github/workflows/ci.yml`) runs `ruff check` (pyflakes errors, see `pyproject.toml`), `compileall` and `python -m unittest discover -s tests -t .` under xvfb.
+`tests/test_platforms.py` (Windows command parser, Docker Desktop control, terminals, notifications, sudo per OS) and `tests/test_buttons.py` (command constants, GUI action wiring) and `tests/test_new_features.py` (settings, keyring/file password storage, engine swap, stdin input, sudo detection, notifications, container details, events, registry, scan, System category, trends) use `unittest.mock` with correct SOC patch targets — no real Docker daemon required. CI (`.github/workflows/ci.yml`) runs `ruff check` (pyflakes errors, see `pyproject.toml`), `compileall` and `python -m unittest discover -s tests -t .` (xvfb on Linux) on Linux, macOS and Windows, plus each installer; the macOS / Windows jobs are `continue-on-error` until first seen green.
+
+The two older modules describe Linux behaviour and pin the platform with `tests.pretend_linux()` in `setUpModule`, so they pass on every CI OS; new OS-specific tests patch `platform_utils` flags instead of relying on the host.
 
 **Patch path rule**: always patch where the name is bound, not where it is defined. For example, `check_docker_running` imported into `src.containers.actions` must be patched as `src.containers.actions.check_docker_running`, not `src.docker.actions.check_docker_running`. `confirm_action_dialog` is a top-level import in `src.shared.item_actions`, so tests for selected-item actions patch `src.shared.item_actions.confirm_action_dialog`.

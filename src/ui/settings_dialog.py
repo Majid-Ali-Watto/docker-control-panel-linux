@@ -3,7 +3,6 @@ Settings dialog: the few preferences stored in ~/.docker-gui/config.json (see
 config_manager.DEFAULT_SETTINGS).
 """
 
-import shutil
 import tkinter as tk
 from tkinter import ttk, messagebox
 
@@ -11,7 +10,8 @@ from src.config.config_manager import get_setting, set_setting, password_storage
 from src.shared.helpers import _center_dialog
 from src.stats.tables import _INTERVALS
 from src.ui.rounded import readable_color
-from src.utils.utils import installed_terminals, docker_needs_sudo
+from src.utils import platform_utils as plat
+from src.utils.utils import installed_terminals, docker_needs_sudo, notification_hint
 
 _ENGINES = ("docker", "podman")
 
@@ -55,18 +55,18 @@ def settings_dialog(root):
 
     notify_check = ttk.Checkbutton(form, variable=notify_var, text="Notify when a build or pull finishes")
     row(3, "Notifications:", notify_check,
-        "Only while the window is not focused." if shutil.which("notify-send")
-        else "notify-send is not installed (sudo apt install libnotify-bin), so no notices are shown.")
+        notification_hint() or "Only while the window is not focused.")
 
-    storage = ttk.Frame(dialog)
-    storage.pack(padx=20, pady=(10, 0), fill=tk.X)
-    where = "the desktop keyring" if password_storage() == "keyring" else "~/.docker-gui/config.json (mode 0600)"
-    ttk.Label(storage, text=f"Saved sudo password is kept in {where}.", font=("Arial", 8),
-              foreground=readable_color("gray"), wraplength=400, justify=tk.LEFT).pack(anchor="w")
-    if not docker_needs_sudo():
-        ttk.Label(storage, text="Your user can run Docker directly, so no sudo password is needed for it.",
-                  font=("Arial", 8), foreground=readable_color("gray"), wraplength=400,
-                  justify=tk.LEFT).pack(anchor="w")
+    if plat.uses_sudo():
+        storage = ttk.Frame(dialog)
+        storage.pack(padx=20, pady=(10, 0), fill=tk.X)
+        where = "the desktop keyring" if password_storage() == "keyring" else "~/.docker-gui/config.json (mode 0600)"
+        ttk.Label(storage, text=f"Saved sudo password is kept in {where}.", font=("Arial", 8),
+                  foreground=readable_color("gray"), wraplength=400, justify=tk.LEFT).pack(anchor="w")
+        if not docker_needs_sudo():
+            ttk.Label(storage, text="Your user can run Docker directly, so no sudo password is needed for it.",
+                      font=("Arial", 8), foreground=readable_color("gray"), wraplength=400,
+                      justify=tk.LEFT).pack(anchor="w")
 
     def on_save():
         previous_engine = get_setting("engine")

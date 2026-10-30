@@ -7,6 +7,7 @@ import os
 import signal
 import subprocess
 
+from src.utils import platform_utils as plat, shell
 from src.utils.utils import async_run, apply_engine
 from src.utils.threads import startThreadForTask
 
@@ -25,20 +26,27 @@ def stream_docker_cmd(cmd, sudo=False, sudo_password=None, output_callback=None,
 
     def task():
         cmd_ = apply_engine(cmd)
-        full_cmd = f"sudo -S {cmd_}" if sudo and sudo_password else cmd_
-        process = subprocess.Popen(
-            full_cmd,
-            shell=True,
-            stdin=subprocess.PIPE if sudo and sudo_password else None,
+        with_sudo = bool(sudo and sudo_password and plat.uses_sudo())
+        full_cmd = f"sudo -S {cmd_}" if with_sudo else cmd_
+        options = dict(
+            stdin=subprocess.PIPE if with_sudo else None,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,
             bufsize=1,
-            start_new_session=True,
         )
+        try:
+            if plat.IS_WIN:
+                process = shell.popen(full_cmd, new_group=True, **options)
+            else:
+                process = subprocess.Popen(full_cmd, shell=True, start_new_session=True, **options)
+        except (OSError, shell.UnsupportedCommand) as exc:
+            if complete_callback:
+                complete_callback(str(exc), 1, False)
+            return
         controller['process'] = process
 
-        if sudo and sudo_password and process.stdin:
+        if with_sudo and process.stdin:
             process.stdin.write(f"{sudo_password}\n")
             process.stdin.flush()
             process.stdin.close()
@@ -71,7 +79,10 @@ def cancel_stream(controller):
     controller['cancelled'] = True
 
     try:
-        os.killpg(process.pid, signal.SIGTERM)
+        if plat.IS_WIN:
+            process.terminate()     # no process groups to signal; this stops docker.exe itself
+        else:
+            os.killpg(process.pid, signal.SIGTERM)
     except Exception:
         try:
             process.terminate()
