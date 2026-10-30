@@ -1,2 +1,4 @@
-ttkbootstrap>=1.10
+# ttkbootstrap 2.x changes the ttk style internals that src/ui/rounded.py themes (buttons lose their
+# colours, frames their borders): stay on 1.x until the app has been ported and tested on 2.x
+ttkbootstrap>=1.10,<2
 pillow>=10.0

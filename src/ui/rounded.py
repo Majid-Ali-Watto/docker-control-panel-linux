@@ -30,8 +30,8 @@ _tk_colors = []                 # (widget, {"bg"/"fg": colour}) for widgets buil
 
 
 def _rgb(color):
-    """(r, g, b) of any Tk colour. Pillow parses #hex and CSS names; Tk's own names (Windows reports
-    plain ttk widgets as "SystemButtonFace", X11 has "gray50") only Tk can resolve."""
+    """(r, g, b) of any Tk colour. Pillow parses #hex and CSS names; Tk's own names (X11 has "gray50",
+    "NavyBlue" ...) only Tk can resolve."""
     try:
         return tuple(ImageColor.getrgb(color)[:3])
     except ValueError:
@@ -63,6 +63,11 @@ def _hex(rgb):
 def _blend(a, b, t):
     ra, rb = _rgb(a), _rgb(b)
     return _hex([x + (y - x) * t for x, y in zip(ra, rb)])
+
+
+def mix_colors(a, b, t):
+    """`a` blended towards `b` by `t` (0..1), as #hex; accepts any Tk colour."""
+    return _blend(a, b, t)
 
 
 def readable(fg, bg, need=4.5):

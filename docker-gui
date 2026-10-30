@@ -1,8 +1,8 @@
-#!/bin/bash
+#!/bin/sh
 
 # Resolve this file's real directory: it is also reached through the ~/.local/bin/docker-gui
-# symlink (BSD readlink on older macOS has no -f, so follow the links by hand)
-SOURCE="${BASH_SOURCE[0]:-$0}"
+# symlink. Plain POSIX sh, so it runs on systems without bash (Alpine, Void).
+SOURCE="$0"
 while [ -L "$SOURCE" ]; do
     DIR="$(cd -P "$(dirname "$SOURCE")" && pwd)"
     SOURCE="$(readlink "$SOURCE")"

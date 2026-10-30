@@ -10,7 +10,6 @@ import tkinter as tk
 from tkinter import ttk
 
 from src.ui.rounded import surface_color
-from src.utils import platform_utils as plat
 
 
 class ScrollFrame(ttk.Frame):
@@ -53,22 +52,17 @@ class ScrollFrame(ttk.Frame):
             label.configure(wraplength=max(width - margin, 40))
 
     # wheel events go to the focused/hovered widget, so listen app-wide only while hovering
-    @staticmethod
-    def _wheel_sequences():
-        # X11 reports the wheel as buttons 4/5; Windows and macOS send <MouseWheel> (on Windows
-        # buttons 4/5 would be the side "back/forward" buttons)
-        return ("<MouseWheel>", "<Button-4>", "<Button-5>") if plat.IS_LINUX else ("<MouseWheel>",)
-
     def _bind_wheel(self, _event):
-        for sequence in self._wheel_sequences():
-            self.bind_all(sequence, self._on_wheel)
+        self.bind_all("<MouseWheel>", self._on_wheel)
+        self.bind_all("<Button-4>", self._on_wheel)
+        self.bind_all("<Button-5>", self._on_wheel)
 
     def _unbind_wheel(self, _event):
         # moving onto a child still counts as "inside"
         x, y = self.winfo_pointerxy()
         if self.winfo_containing(x, y) is not None and str(self.winfo_containing(x, y)).startswith(str(self)):
             return
-        for sequence in self._wheel_sequences():
+        for sequence in ("<MouseWheel>", "<Button-4>", "<Button-5>"):
             self.unbind_all(sequence)
 
     def _on_wheel(self, event):

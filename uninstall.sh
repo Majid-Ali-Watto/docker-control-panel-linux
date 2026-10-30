@@ -21,18 +21,13 @@ echo
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-step "[1/5] Removing desktop entry / application"
+step "[1/5] Removing desktop entry"
 
 if [ -f "$HOME/.local/share/applications/docker-gui.desktop" ]; then
     rm -f "$HOME/.local/share/applications/docker-gui.desktop"
     ok "Desktop entry removed"
 else
     warn "Desktop entry not found"
-fi
-
-if [ -d "$HOME/Applications/Docker Control Panel.app" ]; then
-    rm -rf "$HOME/Applications/Docker Control Panel.app"
-    ok "macOS application removed"
 fi
 
 step "[2/5] Removing launcher"
@@ -46,8 +41,16 @@ fi
 
 step "[3/5] Removing icon"
 
-if [ -f "$HOME/.local/share/icons/docker-control-panel.svg" ]; then
-    rm -f "$HOME/.local/share/icons/docker-control-panel.svg"
+removed_icon=0
+for icon in "$HOME/.local/share/icons/hicolor/scalable/apps/docker-control-panel.svg" \
+            "$HOME/.local/share/icons/hicolor/256x256/apps/docker-control-panel.png" \
+            "$HOME/.local/share/icons/docker-control-panel.svg"; do   # the last one: older versions
+    if [ -f "$icon" ]; then
+        rm -f "$icon"
+        removed_icon=1
+    fi
+done
+if [ "$removed_icon" -eq 1 ]; then
     ok "Application icon removed"
 else
     warn "Icon not found"
@@ -65,7 +68,7 @@ fi
 step "[5/5] Refreshing desktop database"
 
 update-desktop-database "$HOME/.local/share/applications" 2>/dev/null || true
-gtk-update-icon-cache -f -t "$HOME/.local/share/icons" 2>/dev/null || true
+gtk-update-icon-cache -f -t "$HOME/.local/share/icons/hicolor" 2>/dev/null || true
 
 ok "Desktop cache refreshed"
 
@@ -75,7 +78,7 @@ echo
 echo "The following were removed:"
 echo "  • Applications menu entry"
 echo "  • ~/.local/bin/docker-gui"
-echo "  • ~/.local/share/icons/docker-control-panel.svg"
+echo "  • the icon (~/.local/share/icons/hicolor/.../docker-control-panel.*)"
 echo "  • .venv (Python dependencies)"
 echo
 echo "Your project folder was NOT deleted:"

@@ -1,54 +1,62 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+<!-- Vector redraw of the original artwork: a dark app window with the Docker whale carrying its
+     containers and a small live monitor. Square 512 canvas, transparent corners, no fonts or images. -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512" role="img" aria-label="Docker Control Panel">
+  <title>Docker Control Panel</title>
+  <defs>
+    <clipPath id="tile"><rect width="512" height="512" rx="54"/></clipPath>
+  </defs>
 
-  <!-- App background -->
-  <rect width="256" height="256" rx="36" fill="#1A6FD4"/>
+  <!-- window -->
+  <rect width="512" height="512" rx="54" fill="#1f212e"/>
+  <rect x="1.5" y="1.5" width="509" height="509" rx="52.5" fill="none" stroke="#ffffff" stroke-opacity="0.10" stroke-width="3"/>
 
-  <!-- ── Shipping containers on the whale's back ─────────────────────── -->
-  <!-- Row 1 — two containers -->
-  <rect x="62"  y="68" width="36" height="28" rx="4" fill="white" opacity="0.95"/>
-  <line x1="62"  y1="82" x2="98"  y2="82" stroke="#1A6FD4" stroke-width="2" opacity="0.4"/>
+  <!-- title bar with the three window buttons -->
+  <path d="M16 64 V52 Q16 16 52 16 H460 Q496 16 496 52 V64 Z" fill="#526a8e"/>
+  <circle cx="46"  cy="39" r="8" fill="#fe605f"/>
+  <circle cx="77"  cy="39" r="8" fill="#feac60"/>
+  <circle cx="107" cy="39" r="8" fill="#77fab8"/>
 
-  <rect x="104" y="68" width="36" height="28" rx="4" fill="white" opacity="0.95"/>
-  <line x1="104" y1="82" x2="140" y2="82" stroke="#1A6FD4" stroke-width="2" opacity="0.4"/>
+  <!-- everything below is drawn in the coordinates of the source image's zoomed whale crop -->
+  <g transform="translate(65.6 116.8) scale(0.3647 0.3743)">
+    <!-- containers -->
+    <g>
+      <rect x="138" y="292" width="98" height="100" rx="9" fill="#9be1ad"/>
+      <rect x="260" y="292" width="98" height="100" rx="9" fill="#85b3f1"/>
+      <rect x="382" y="292" width="100" height="100" rx="9" fill="#8ab6f5"/>
+      <rect x="506" y="292" width="98" height="100" rx="9" fill="#87b4f5"/>
+      <rect x="630" y="292" width="98" height="100" rx="9" fill="#feb78b"/>
+      <rect x="260" y="172" width="98" height="98" rx="9" fill="#9de1ae"/>
+      <rect x="382" y="172" width="100" height="98" rx="9" fill="#85b3f1"/>
+      <rect x="506" y="172" width="98" height="98" rx="9" fill="#87b4f5"/>
+      <rect x="506" y="52"  width="98" height="98" rx="9" fill="#9de1b2"/>
+    </g>
 
-  <!-- Row 2 — three containers -->
-  <rect x="40"  y="100" width="36" height="28" rx="4" fill="white" opacity="0.95"/>
-  <line x1="40"  y1="114" x2="76"  y2="114" stroke="#1A6FD4" stroke-width="2" opacity="0.4"/>
+    <!-- whale outline and flipper -->
+    <g fill="none" stroke="#7ec6ee" stroke-width="19" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M60 428 H770 C815 428 840 412 840 388
+               C800 350 790 270 838 192
+               C880 205 912 260 918 328
+               C960 305 1030 298 1072 336
+               C1050 380 990 428 905 434
+               C880 540 790 660 660 735
+               C560 780 470 790 400 770
+               C280 740 160 690 105 600
+               C62 530 45 470 60 428 Z"/>
+      <path d="M130 652 C190 655 255 645 305 632 C325 690 360 725 420 760"/>
+    </g>
 
-  <rect x="82"  y="100" width="36" height="28" rx="4" fill="white" opacity="0.95"/>
-  <line x1="82"  y1="114" x2="118" y2="114" stroke="#1A6FD4" stroke-width="2" opacity="0.4"/>
+    <!-- live monitor inside the whale -->
+    <rect x="346" y="487" width="254" height="161" rx="22" fill="#2e3b4d"/>
+    <rect x="380" y="516" width="60" height="10" rx="5" fill="#8fe3ae"/>
+    <path d="M378 613 L440 570 L490 608 L570 530" fill="none" stroke="#8fe3ae" stroke-width="12"
+          stroke-linecap="round" stroke-linejoin="round"/>
 
-  <rect x="124" y="100" width="36" height="28" rx="4" fill="white" opacity="0.95"/>
-  <line x1="124" y1="114" x2="160" y2="114" stroke="#1A6FD4" stroke-width="2" opacity="0.4"/>
-
-  <!-- ── Whale body ──────────────────────────────────────────────────── -->
-  <path d="
-    M 30 148
-    Q 28 174  60 176
-    L 168 176
-    Q 200 176  200 156
-    Q 200 136  174 136
-    L 50  136
-    Q 28 136  30 148
-    Z"
-    fill="white"/>
-
-  <!-- Whale tail -->
-  <path d="
-    M 190 148
-    Q 224 132  220 158
-    Q 228 172  206 165
-    Z"
-    fill="white"/>
-
-  <!-- Whale eye -->
-  <circle cx="64" cy="158" r="6" fill="#1A6FD4"/>
-  <circle cx="66" cy="156" r="2" fill="white" opacity="0.5"/>
-
-  <!-- ── Water spout ─────────────────────────────────────────────────── -->
-  <path d="M 158 130 Q 166 108  156  92 Q 152  84  160  78 Q 168  84  164  96 Q 174 110  166 130"
-        fill="none" stroke="white" stroke-width="6"
-        stroke-linecap="round" stroke-linejoin="round" opacity="0.9"/>
-
+    <!-- ON badge (letters drawn as strokes, so no font is needed) -->
+    <rect x="630" y="487" width="116" height="70" rx="17" fill="#2c3d4d"/>
+    <g fill="none" stroke="#8fe3ae" stroke-width="8" stroke-linecap="round" stroke-linejoin="round">
+      <ellipse cx="667" cy="522" rx="13" ry="15"/>
+      <path d="M696 537 V507 L722 537 V507"/>
+    </g>
+  </g>
 </svg>

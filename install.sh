@@ -1,14 +1,34 @@
-#!/bin/bash
-# Docker Control Panel - Installation Script (Linux and macOS; Windows: install.ps1 / install.bat)
+#!/bin/sh
+# Docker Control Panel - Installation Script (Linux)
 #
 # One command, no questions: installs the system packages it needs (python3 + tkinter + venv,
 # Docker, a terminal emulator), builds a private .venv with the Python dependencies, and adds
 # the desktop entry + `docker-gui` command. Safe to run again.
 #
-#   Linux  apt / dnf / pacman / zypper, desktop entry, ~/.local/bin/docker-gui
-#   macOS  Homebrew (installed if missing), Docker Desktop, ~/Applications/Docker Control Panel.app
-#
-# Written for bash 3.2 (what macOS ships): no associative arrays, empty arrays guarded for `set -u`.
+# Distros: Debian / Ubuntu and derivatives (apt), Fedora / RHEL / Rocky / Alma / CentOS / Amazon
+# Linux (dnf, yum), Arch / Manjaro (pacman), openSUSE / SLE (zypper), Alpine (apk), Void (xbps).
+# Init systems for the Docker service: systemd, OpenRC, runit, SysV.
+
+# The first lines must stay POSIX sh: minimal systems (Alpine) have no bash until we install it.
+if [ -z "${BASH_VERSION:-}" ]; then
+    if ! command -v bash > /dev/null 2>&1; then
+        echo "  ->  bash is required - installing it"
+        if [ "$(id -u)" -eq 0 ]; then _root=""
+        elif command -v sudo > /dev/null 2>&1; then _root="sudo"
+        elif command -v doas > /dev/null 2>&1; then _root="doas"
+        else echo "  x  Install bash first (needs root: no sudo or doas found)."; exit 1; fi
+        if   command -v apk > /dev/null 2>&1;         then $_root apk add --no-cache bash
+        elif command -v apt-get > /dev/null 2>&1;     then $_root apt-get install -y bash
+        elif command -v dnf > /dev/null 2>&1;         then $_root dnf install -y bash
+        elif command -v yum > /dev/null 2>&1;         then $_root yum install -y bash
+        elif command -v pacman > /dev/null 2>&1;      then $_root pacman -S --needed --noconfirm bash
+        elif command -v zypper > /dev/null 2>&1;      then $_root zypper --non-interactive install bash
+        elif command -v xbps-install > /dev/null 2>&1; then $_root xbps-install -Sy bash   # -S: a fresh image has no package index
+        fi
+        command -v bash > /dev/null 2>&1 || { echo "  x  Could not install bash."; exit 1; }
+    fi
+    exec bash "$0" "$@"
+fi
 
 set -u
 
@@ -40,12 +60,12 @@ echo "  ██████╔╝╚██████╔╝╚██████
 echo "  ╚═════╝  ╚═════╝  ╚═════╝╚═╝  ╚═╝╚══════╝╚═╝  ╚═╝"
 echo -e "${RESET}"
 echo -e "  ${BOLD}🐳  Docker Control Panel  —  Installer${RESET}"
-echo -e "  ${DIM}A graphical Docker manager for Linux, macOS and Windows${RESET}"
+echo -e "  ${DIM}A graphical Docker manager for Linux${RESET}"
 echo
 echo -e "  ${DIM}────────────────────────────────────────────────────${RESET}"
 echo
 
-# Directory of this script, following symlinks (BSD readlink has no -f before macOS 12.3)
+# Directory of this script, following symlinks
 SOURCE="${BASH_SOURCE[0]}"
 while [ -L "$SOURCE" ]; do
     DIR="$(cd -P "$(dirname "$SOURCE")" && pwd)"
@@ -54,51 +74,46 @@ while [ -L "$SOURCE" ]; do
 done
 SCRIPT_DIR="$(cd -P "$(dirname "$SOURCE")" && pwd)"
 VENV="$SCRIPT_DIR/.venv"
-MIN_PY_MINOR=10
+MIN_PY_MINOR=8
 
-case "$(uname -s)" in
-    Linux)  OS=linux ;;
-    Darwin) OS=mac ;;
-    *)      die "Unsupported system: $(uname -s). On Windows run install.ps1 (or double-click install.bat)." ;;
-esac
-
-if [ "$OS" = linux ] && [ "$(id -u)" -eq 0 ] && [ -z "${SUDO_USER:-}" ]; then
-    warn "Running as root: the desktop entry and command go to root's home, not a regular user's."
-fi
+[ "$(uname -s)" = "Linux" ] || die "This installer is for Linux (found $(uname -s))."
 
 # ── helpers ─────────────────────────────────────────────────────────────────
-SUDO=""
+ROOT_CMD=""
 if [ "$(id -u)" -ne 0 ]; then
-    command -v sudo &> /dev/null && SUDO="sudo" || SUDO="__missing__"
+    if   command -v sudo > /dev/null 2>&1; then ROOT_CMD="sudo"
+    elif command -v doas > /dev/null 2>&1; then ROOT_CMD="doas"
+    else ROOT_CMD="__missing__"; fi
+else
+    [ -z "${SUDO_USER:-}" ] && warn "Running as root: the desktop entry and command go to root's home, not a regular user's."
 fi
 
 # Run a command as root (sudo asks for the password itself, once, thanks to its timestamp cache).
 as_root() {
-    if [ "$SUDO" = "__missing__" ]; then
-        err "Need root to install packages but sudo is not available. Run this script as root."
+    if [ "$ROOT_CMD" = "__missing__" ]; then
+        err "Need root to install packages but neither sudo nor doas is available. Run this script as root."
         return 1
     fi
-    $SUDO "$@"
+    $ROOT_CMD "$@"
 }
 
+# Keep in sync with src/utils/terminals.py
 has_term() {
-    for t in tilix gnome-terminal x-terminal-emulator xfce4-terminal konsole \
-             mate-terminal terminator xterm; do
+    for t in tilix gnome-terminal ptyxis kgx x-terminal-emulator xfce4-terminal konsole mate-terminal \
+             lxterminal qterminal terminator kitty alacritty wezterm foot urxvt xterm; do
         command -v "$t" &> /dev/null && return 0
     done
     return 1
 }
 
-# A Python this app can run on: 3.10+, with venv and a Tk of at least 8.6 (macOS's own is 8.5)
+# A Python this app can run on: 3.$MIN_PY_MINOR+, with venv and a Tk of at least 8.6
 python_usable() {
     "$1" -c "import sys, tkinter, venv, ensurepip; sys.exit(sys.version_info < (3, $MIN_PY_MINOR) or tkinter.TkVersion < 8.6)" &> /dev/null
 }
 
 pick_python() {
-    local candidate brew_bin=""
-    command -v brew &> /dev/null && brew_bin="$(brew --prefix 2> /dev/null)/bin"
-    for candidate in python3 python3.14 python3.13 python3.12 python3.11 python3.10 \
-                     ${brew_bin:+"$brew_bin/python3.12"} ${brew_bin:+"$brew_bin/python3"}; do
+    local candidate
+    for candidate in python3 python3.14 python3.13 python3.12 python3.11 python3.10 python3.9 python3.8; do
         command -v "$candidate" &> /dev/null || continue
         if python_usable "$candidate"; then command -v "$candidate"; return 0; fi
     done
@@ -114,145 +129,182 @@ OPTIONAL=()     # nice to have; failure only warns
 step "  [1/6]  Detecting your system"
 # ══════════════════════════════════════════════════════════════════════════════
 
-if [ "$OS" = mac ]; then
-    ok "macOS $(sw_vers -productVersion 2> /dev/null)  ${DIM}($(uname -m))${RESET}"
-else
-    # shellcheck disable=SC1091
-    [ -r /etc/os-release ] && . /etc/os-release
-    DISTRO="${PRETTY_NAME:-$(uname -s)}"
-    FAMILY=" ${ID:-} ${ID_LIKE:-} "
+# shellcheck disable=SC1091
+[ -r /etc/os-release ] && . /etc/os-release
+DISTRO="${PRETTY_NAME:-Linux}"
+FAMILY=" ${ID:-} ${ID_LIKE:-} "
 
-    if   command -v apt-get &> /dev/null; then PM=apt
-    elif command -v dnf     &> /dev/null; then PM=dnf
-    elif command -v pacman  &> /dev/null; then PM=pacman
-    elif command -v zypper  &> /dev/null; then PM=zypper
-    else PM=""
-    fi
-    ok "${DISTRO}  ${DIM}(package manager: ${PM:-none found})${RESET}"
-
-    # Package names differ per distro family.
-    case "$PM" in
-        apt)    PKG_PY="python3 python3-venv python3-pip"; PKG_TK="python3-tk"
-                PKG_DOCKER="docker.io"; PKG_SECRET="libsecret-tools" ;;
-        dnf)    PKG_PY="python3 python3-pip";              PKG_TK="python3-tkinter"
-                PKG_DOCKER="moby-engine"; PKG_SECRET="libsecret"
-                [[ "$FAMILY" == *" rhel "* || "$FAMILY" == *" centos "* ]] && PKG_DOCKER="docker" ;;
-        pacman) PKG_PY="python python-pip";                PKG_TK="tk"
-                PKG_DOCKER="docker"; PKG_SECRET="libsecret" ;;
-        zypper) PKG_PY="python3 python3-pip";              PKG_TK="python3-tk"
-                PKG_DOCKER="docker"; PKG_SECRET="libsecret-tools" ;;
-    esac
-    PKG_TERM="xterm"
+if   command -v apt-get     &> /dev/null; then PM=apt
+elif command -v dnf         &> /dev/null; then PM=dnf
+elif command -v yum         &> /dev/null; then PM=yum
+elif command -v pacman      &> /dev/null; then PM=pacman
+elif command -v zypper      &> /dev/null; then PM=zypper
+elif command -v apk         &> /dev/null; then PM=apk
+elif command -v xbps-install &> /dev/null; then PM=xbps
+else PM=""
 fi
+ok "${DISTRO}  ${DIM}(package manager: ${PM:-none found}, $(uname -m))${RESET}"
+
+if [ "${ID:-}" = "nixos" ]; then
+    err "NixOS has no FHS paths for this installer to work with. Run the app from a shell instead:"
+    info "nix-shell -p 'python3.withPackages (p: [ p.tkinter p.pillow p.ttkbootstrap ])' docker --run ./docker_gui_modular.py"
+    exit 1
+fi
+if [ -e /run/ostree-booted ]; then
+    warn "Immutable system (ostree): packages cannot be installed in place. If tkinter or Docker are missing,"
+    info "layer them (rpm-ostree install python3-tkinter docker) or run this inside a toolbox / distrobox."
+fi
+
+# Package names differ per distro family.
+PKG_PY_VERSIONED=""     # fallback sets for a system Python that is too old: "version|packages"
+case "$PM" in
+    apt)    PKG_PY="python3 python3-venv python3-pip"; PKG_TK="python3-tk"
+            PKG_DOCKER="docker.io"; PKG_SECRET="libsecret-tools"
+            PKG_PY_VERSIONED="3.12|python3.12 python3.12-venv python3.12-tk
+3.11|python3.11 python3.11-venv python3.11-tk
+3.10|python3.10 python3.10-venv python3.10-tk
+3.9|python3.9 python3.9-venv python3.9-tk" ;;
+    dnf|yum) PKG_PY="python3 python3-pip";             PKG_TK="python3-tkinter"
+            PKG_SECRET="libsecret"
+            # Fedora ships Moby; Amazon Linux has `docker`; RHEL / Rocky / Alma / CentOS need Docker's own repo
+            case "$FAMILY" in
+                *" fedora "*) PKG_DOCKER="moby-engine" ;;
+                *)            PKG_DOCKER="docker" ;;
+            esac
+            PKG_PY_VERSIONED="3.12|python3.12 python3.12-tkinter python3.12-pip
+3.11|python3.11 python3.11-tkinter python3.11-pip
+3.9|python3.9 python3.9-tkinter python3.9-pip" ;;
+    pacman) PKG_PY="python python-pip";                PKG_TK="tk"
+            PKG_DOCKER="docker"; PKG_SECRET="libsecret" ;;
+    zypper) PKG_PY="python3 python3-pip";              PKG_TK="python3-tk"
+            PKG_DOCKER="docker"; PKG_SECRET="libsecret-tools"
+            PKG_PY_VERSIONED="3.12|python312 python312-tk python312-pip
+3.11|python311 python311-tk python311-pip
+3.10|python310 python310-tk python310-pip" ;;
+    apk)    PKG_PY="python3 py3-pip";                  PKG_TK="python3-tkinter"
+            PKG_DOCKER="docker"; PKG_SECRET="libsecret" ;;
+    xbps)   PKG_PY="python3 python3-pip";              PKG_TK="python3-tkinter"
+            PKG_DOCKER="docker"; PKG_SECRET="libsecret" ;;
+esac
+PKG_TERM="xterm"
 
 pm_install() {
     case "$PM" in
-        apt)    as_root env DEBIAN_FRONTEND=noninteractive apt-get install -y "$@" ;;
-        dnf)    as_root dnf install -y "$@" ;;
+        apt)     as_root env DEBIAN_FRONTEND=noninteractive apt-get install -y "$@" ;;
+        dnf)     as_root dnf install -y "$@" ;;
+        yum)     as_root yum install -y "$@" ;;
         # "target not found" usually means a never-synced package database: sync it and retry once
-        pacman) as_root pacman -S --needed --noconfirm "$@" || as_root pacman -Sy --needed --noconfirm "$@" ;;
-        zypper) as_root zypper --non-interactive install "$@" ;;
-        *)      return 1 ;;
+        pacman)  as_root pacman -S --needed --noconfirm "$@" || as_root pacman -Sy --needed --noconfirm "$@" ;;
+        zypper)  as_root zypper --non-interactive install "$@" ;;
+        apk)     as_root apk add --no-cache "$@" ;;
+        xbps)    as_root xbps-install -y "$@" || as_root xbps-install -Sy "$@" ;;
+        *)       return 1 ;;
     esac
+}
+
+# RHEL / Rocky / Alma / CentOS / Oracle have no Docker in their own repos: use Docker's official one
+install_docker_from_docker_repo() {
+    local repo="centos" file="/etc/yum.repos.d/docker-ce.repo"
+    [[ "$FAMILY" == *" fedora "* ]] && repo="fedora"
+    info "Adding Docker's package repository"
+    as_root "$PM" install -y dnf-plugins-core > /dev/null 2>&1 || as_root "$PM" install -y yum-utils > /dev/null 2>&1
+    as_root "$PM" config-manager --add-repo "https://download.docker.com/linux/$repo/docker-ce.repo" > /dev/null 2>&1 \
+        || as_root "$PM" config-manager addrepo --from-repofile="https://download.docker.com/linux/$repo/docker-ce.repo" > /dev/null 2>&1 \
+        || return 1
+    if ! as_root "$PM" install -y docker-ce docker-ce-cli containerd.io > /dev/null 2>&1; then
+        as_root rm -f "$file"        # an unreachable repo would make every later dnf / yum command fail
+        return 1
+    fi
+}
+
+enable_docker_service() {
+    if [ -d /run/systemd/system ]; then
+        as_root systemctl enable --now docker
+    elif command -v rc-update &> /dev/null; then
+        as_root rc-update add docker default && as_root rc-service docker start
+    elif [ -d /etc/sv/docker ] && [ -d /var/service ]; then
+        as_root ln -sf /etc/sv/docker /var/service/
+    elif command -v service &> /dev/null; then
+        as_root service docker start
+    else
+        return 1
+    fi
 }
 
 # ══════════════════════════════════════════════════════════════════════════════
 step "  [2/6]  Installing system packages"
 # ══════════════════════════════════════════════════════════════════════════════
 
-if [ "$OS" = mac ]; then
-    # Homebrew is how Python (with a modern Tk) and Docker Desktop get installed
-    if ! command -v brew &> /dev/null; then
-        for b in /opt/homebrew/bin/brew /usr/local/bin/brew; do
-            [ -x "$b" ] && eval "$("$b" shellenv)" && break
-        done
-    fi
-    if ! command -v brew &> /dev/null; then
-        info "Installing Homebrew (needs your password once)"
-        sudo -v || die "Administrator access is needed to install Homebrew."
-        NONINTERACTIVE=1 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)" \
-            || die "Homebrew could not be installed. See https://brew.sh and run this script again."
-        for b in /opt/homebrew/bin/brew /usr/local/bin/brew; do
-            [ -x "$b" ] && eval "$("$b" shellenv)" && break
-        done
-        command -v brew &> /dev/null || die "Homebrew was installed but 'brew' is not on PATH."
-    fi
-    ok "Homebrew  ${DIM}($(brew --prefix))${RESET}"
-
-    PYTHON="$(pick_python)" || {
-        info "Installing: python@3.12 python-tk@3.12"
-        brew install python@3.12 python-tk@3.12 > /dev/null || die "Could not install Python with Homebrew."
-        PYTHON="$(pick_python)" || die "No usable Python (3.$MIN_PY_MINOR+ with Tk 8.6) found after installing."
-    }
-
-    if ! command -v docker &> /dev/null && [ ! -d /Applications/Docker.app ]; then
-        info "Installing: Docker Desktop"
-        if brew install --cask docker-desktop > /dev/null 2>&1 || brew install --cask docker > /dev/null 2>&1; then
-            DOCKER_NEW=1
-        else
-            warn "Could not install Docker Desktop — get it from https://www.docker.com/products/docker-desktop/"
-        fi
-    fi
+command -v python3 &> /dev/null || REQUIRED+=($PKG_PY)
+if command -v python3 &> /dev/null; then
+    python3 -c "import tkinter" &> /dev/null || REQUIRED+=($PKG_TK)
+    python3 -c "import venv, ensurepip" &> /dev/null || REQUIRED+=($PKG_PY)
 else
-    command -v python3 &> /dev/null || REQUIRED+=($PKG_PY)
-    if command -v python3 &> /dev/null; then
-        python3 -c "import tkinter" &> /dev/null || REQUIRED+=($PKG_TK)
-        python3 -c "import venv, ensurepip" &> /dev/null || REQUIRED+=($PKG_PY)
-    else
-        REQUIRED+=($PKG_TK)
-    fi
-    command -v docker &> /dev/null || { OPTIONAL+=($PKG_DOCKER); DOCKER_NEW=1; }
-    has_term || OPTIONAL+=($PKG_TERM)
-    command -v secret-tool &> /dev/null || OPTIONAL+=($PKG_SECRET)
+    REQUIRED+=($PKG_TK)
+fi
+command -v docker &> /dev/null || { OPTIONAL+=($PKG_DOCKER); DOCKER_NEW=1; }
+has_term || OPTIONAL+=($PKG_TERM)
+command -v secret-tool &> /dev/null || OPTIONAL+=($PKG_SECRET)
+command -v sudo &> /dev/null || [ "$(id -u)" -eq 0 ] || OPTIONAL+=(sudo)   # the app runs docker through sudo
 
-    if [ -z "$PM" ] && { [ "${#REQUIRED[@]}" -gt 0 ] || [ "${#OPTIONAL[@]}" -gt 0 ]; }; then
-        warn "No supported package manager (apt, dnf, pacman, zypper) — install these yourself:"
-        info "python 3.$MIN_PY_MINOR+ with venv + tkinter, docker, a terminal emulator"
-    elif [ "${#REQUIRED[@]}" -gt 0 ] || [ "${#OPTIONAL[@]}" -gt 0 ]; then
-        [ "$PM" = apt ] && info "Refreshing package lists" && as_root apt-get update -qq
-        if [ "${#REQUIRED[@]}" -gt 0 ]; then
-            info "Installing: ${REQUIRED[*]}"
-            pm_install "${REQUIRED[@]}" > /dev/null || die "Could not install: ${REQUIRED[*]}"
-        fi
-        # one by one, so a package missing from this distro's repos does not block the others
-        for pkg in ${OPTIONAL[@]+"${OPTIONAL[@]}"}; do
-            info "Installing: $pkg"
-            pm_install "$pkg" > /dev/null || { warn "Could not install '$pkg' — continuing without it."; [ "$pkg" = "$PKG_DOCKER" ] && DOCKER_NEW=0; }
-        done
-    else
-        ok "Everything already installed"
-    fi
+if [ -z "$PM" ] && { [ "${#REQUIRED[@]}" -gt 0 ] || [ "${#OPTIONAL[@]}" -gt 0 ]; }; then
+    warn "No supported package manager (apt, dnf, yum, pacman, zypper, apk, xbps) — install these yourself:"
+    info "python 3.$MIN_PY_MINOR+ with venv + tkinter, docker, a terminal emulator"
+elif [ "${#REQUIRED[@]}" -gt 0 ]; then
+    [ "$PM" = apt ] && info "Refreshing package lists" && as_root apt-get update -qq
+    info "Installing: ${REQUIRED[*]}"
+    pm_install "${REQUIRED[@]}" > /dev/null || die "Could not install: ${REQUIRED[*]}"
+elif [ "${#OPTIONAL[@]}" -gt 0 ]; then
+    [ "$PM" = apt ] && info "Refreshing package lists" && as_root apt-get update -qq
+else
+    ok "Everything already installed"
+fi
 
-    command -v python3 &> /dev/null || die "Python 3 is not installed."
-    PYTHON="$(pick_python)" || {
-        python3 -c "import tkinter" &> /dev/null || die "Tkinter is missing and could not be installed — install your distro's python3 tkinter package."
-        python3 -c "import venv, ensurepip" &> /dev/null || die "The Python venv module is missing — install your distro's python3-venv package."
-        die "Python 3.$MIN_PY_MINOR or newer is required (found $(python3 --version 2>&1))."
-    }
+command -v python3 &> /dev/null || die "Python 3 is not installed."
+if ! PYTHON="$(pick_python)"; then
+    # The distro's default Python is older than we need (CentOS / RHEL 8, openSUSE Leap 15, ...): try newer ones side by side
+    while IFS='|' read -r version packages; do
+        [ -n "$version" ] || continue
+        info "System Python is too old — trying Python $version"
+        # shellcheck disable=SC2086
+        pm_install $packages > /dev/null 2>&1 < /dev/null || continue
+        PYTHON="$(pick_python)" && break
+    done <<< "$PKG_PY_VERSIONED"
+fi
+if [ -z "$PYTHON" ]; then
+    python3 -c "import tkinter" &> /dev/null || die "Tkinter is missing and could not be installed — install your distro's python3 tkinter package."
+    python3 -c "import venv, ensurepip" &> /dev/null || die "The Python venv module is missing — install your distro's python3-venv package."
+    die "Python 3.$MIN_PY_MINOR or newer with Tk 8.6 is required (found $(python3 --version 2>&1))."
 fi
 ok "Python  ${DIM}($("$PYTHON" --version 2>&1), tkinter $("$PYTHON" -c 'import tkinter; print(tkinter.TkVersion)'), venv)${RESET}"
 
-if command -v docker &> /dev/null || [ -d /Applications/Docker.app ]; then
-    if command -v docker &> /dev/null; then
-        ok "Docker  ${DIM}($(docker --version 2>&1 | sed 's/Docker version //'))${RESET}"
-    else
-        ok "Docker Desktop installed  ${DIM}(open it once to finish its setup)${RESET}"
-    fi
-    if [ "$DOCKER_NEW" -eq 1 ]; then
-        if [ "$OS" = mac ]; then
-            open -a Docker &> /dev/null && ok "Docker Desktop is starting — accept its first-run prompts" \
-                || warn "Open Docker Desktop once to finish its setup."
-        elif command -v systemctl &> /dev/null; then
-            as_root systemctl enable --now docker &> /dev/null && ok "Docker service enabled and started" \
-                || warn "Could not start the Docker service — use the Start button in the app."
+# Extras last: a problem with one of them (an unreachable Docker repository ...) must never get in the
+# way of the Python the app needs
+if [ -n "$PM" ]; then
+    # one by one, so a package missing from this distro's repos does not block the others
+    for pkg in ${OPTIONAL[@]+"${OPTIONAL[@]}"}; do
+        info "Installing: $pkg"
+        if ! pm_install "$pkg" > /dev/null 2>&1 < /dev/null; then
+            if [ "$pkg" = "$PKG_DOCKER" ] && { [ "$PM" = dnf ] || [ "$PM" = yum ]; } && install_docker_from_docker_repo; then
+                continue
+            fi
+            warn "Could not install '$pkg' — continuing without it."
+            [ "$pkg" = "$PKG_DOCKER" ] && DOCKER_NEW=0
         fi
+    done
+fi
+
+
+if command -v docker &> /dev/null; then
+    ok "Docker  ${DIM}($(docker --version 2>&1 | sed 's/Docker version //'))${RESET}"
+    if [ "$DOCKER_NEW" -eq 1 ]; then
+        enable_docker_service &> /dev/null && ok "Docker service enabled and started" \
+            || warn "Could not start the Docker service — use the Start button in the app."
     fi
 else
-    warn "Docker is not installed — the app will not manage anything until it is."
+    warn "Docker is not installed — the app will not manage anything until it is. See https://docs.docker.com/engine/install/"
 fi
-if [ "$OS" = linux ]; then
-    has_term && ok "Terminal emulator found" || warn "No terminal emulator — the Container Terminal feature will not work."
-fi
+has_term && ok "Terminal emulator found" || warn "No terminal emulator — the Container Terminal feature will not work."
 
 # ══════════════════════════════════════════════════════════════════════════════
 step "  [3/6]  Setting up the Python environment"
@@ -271,8 +323,10 @@ fi
 if [ ! -d "$VENV" ]; then
     "$PYTHON" -m venv "$VENV" || die "Could not create the virtual environment at $VENV"
 fi
+# old distros ship a pip that cannot read newer wheel tags
+"$VENV/bin/python" -m pip install --quiet --disable-pip-version-check --upgrade pip &> /dev/null || true
 "$VENV/bin/python" -m pip install --quiet --disable-pip-version-check -r "$SCRIPT_DIR/requirements.txt" \
-    || die "pip could not install the requirements (network down?). Re-run ./install.sh when online."
+    || die "pip could not install the requirements (network down, or no prebuilt Pillow for $(uname -m)?). Re-run ./install.sh when online."
 deps_ok || die "The Python dependencies installed but cannot be imported."
 ok "Dependencies installed  ${DIM}(${VENV})${RESET}"
 
@@ -284,56 +338,29 @@ chmod +x "$SCRIPT_DIR/docker-gui"
 ok "docker-gui marked executable"
 
 # ══════════════════════════════════════════════════════════════════════════════
-step "  [5/6]  Creating the application entry"
+step "  [5/6]  Creating desktop entry"
 # ══════════════════════════════════════════════════════════════════════════════
 
-if [ "$OS" = mac ]; then
-    # A minimal app bundle: shows up in Launchpad / Spotlight / ~/Applications
-    APP="$HOME/Applications/Docker Control Panel.app"
-    rm -rf "$APP"
-    mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
-    cat > "$APP/Contents/MacOS/docker-control-panel" << EOF
-#!/bin/bash
-exec "$SCRIPT_DIR/docker-gui" "\$@"
-EOF
-    chmod +x "$APP/Contents/MacOS/docker-control-panel"
-    ICON_KEY=""
-    if [ -f "$SCRIPT_DIR/assets/docker-icon.png" ] \
-        && sips -s format icns "$SCRIPT_DIR/assets/docker-icon.png" --out "$APP/Contents/Resources/AppIcon.icns" &> /dev/null; then
-        ICON_KEY="<key>CFBundleIconFile</key><string>AppIcon</string>"
-        ok "App icon installed"
-    else
-        warn "Could not build the app icon — the app will use a generic one"
-    fi
-    cat > "$APP/Contents/Info.plist" << EOF
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0"><dict>
-  <key>CFBundleExecutable</key><string>docker-control-panel</string>
-  <key>CFBundleIdentifier</key><string>dev.docker-control-panel</string>
-  <key>CFBundleName</key><string>Docker Control Panel</string>
-  <key>CFBundlePackageType</key><string>APPL</string>
-  <key>CFBundleVersion</key><string>1.0</string>
-  <key>NSHighResolutionCapable</key><true/>
-  ${ICON_KEY}
-</dict></plist>
-EOF
-    ok "Application created  ${DIM}(~/Applications/Docker Control Panel.app)${RESET}"
+# Install the app icon into the user's hicolor icon theme (the standard place menus look in:
+# GNOME, KDE, XFCE, Cinnamon, MATE ...): the SVG for any size, plus a 256 px PNG for launchers
+# that cannot draw SVG. The menu entry then refers to it by name.
+ICON_NAME="docker-control-panel"
+ICON_ROOT="$HOME/.local/share/icons/hicolor"
+if [ -f "$SCRIPT_DIR/assets/docker-icon.svg" ]; then
+    mkdir -p "$ICON_ROOT/scalable/apps" "$ICON_ROOT/256x256/apps"
+    cp "$SCRIPT_DIR/assets/docker-icon.svg" "$ICON_ROOT/scalable/apps/$ICON_NAME.svg"
+    [ -f "$SCRIPT_DIR/assets/docker-icon.png" ] && cp "$SCRIPT_DIR/assets/docker-icon.png" "$ICON_ROOT/256x256/apps/$ICON_NAME.png"
+    rm -f "$HOME/.local/share/icons/$ICON_NAME.svg"      # older versions kept it here
+    gtk-update-icon-cache -f -t "$ICON_ROOT" 2>/dev/null || true
+    ICON_DEST="$ICON_NAME"
+    ok "App icon installed  ${DIM}(${ICON_ROOT}/scalable/apps/${ICON_NAME}.svg)${RESET}"
 else
-    # Install the bundled Docker whale icon
-    ICON_SRC="$SCRIPT_DIR/assets/docker-icon.svg"
-    ICON_DEST="$HOME/.local/share/icons/docker-control-panel.svg"
-    mkdir -p "$HOME/.local/share/icons"
-    if [ -f "$ICON_SRC" ]; then
-        cp "$ICON_SRC" "$ICON_DEST"
-        ok "App icon installed  ${DIM}(${ICON_DEST})${RESET}"
-    else
-        warn "Bundled icon not found — desktop entry will use fallback icon"
-        ICON_DEST="utilities-system-monitor"
-    fi
+    warn "Bundled icon not found — desktop entry will use fallback icon"
+    ICON_DEST="utilities-system-monitor"
+fi
 
-    mkdir -p ~/.local/share/applications
-    cat > ~/.local/share/applications/docker-gui.desktop << EOF
+mkdir -p ~/.local/share/applications
+cat > ~/.local/share/applications/docker-gui.desktop << EOF
 [Desktop Entry]
 Version=1.0
 Type=Application
@@ -346,11 +373,9 @@ Categories=System;Utility;
 Keywords=docker;container;management;
 EOF
 
-    chmod +x ~/.local/share/applications/docker-gui.desktop
-    update-desktop-database ~/.local/share/applications/ 2>/dev/null || true
-    gtk-update-icon-cache -f -t "$HOME/.local/share/icons" 2>/dev/null || true
-    ok "Desktop entry created  ${DIM}(Applications → Docker Control Panel)${RESET}"
-fi
+chmod +x ~/.local/share/applications/docker-gui.desktop
+update-desktop-database ~/.local/share/applications/ 2>/dev/null || true
+ok "Desktop entry created  ${DIM}(Applications → Docker Control Panel)${RESET}"
 
 # ══════════════════════════════════════════════════════════════════════════════
 step "  [6/6]  Creating command-line shortcut"
@@ -367,15 +392,16 @@ echo
 echo -e "  ${GREEN}${BOLD}🐳  Installation complete!${RESET}"
 echo
 echo -e "  ${BOLD}Run the app:${RESET}"
-if [ "$OS" = mac ]; then
-    echo -e "    ${CYAN}1.${RESET}  Launchpad / Spotlight  →  Docker Control Panel"
-else
-    echo -e "    ${CYAN}1.${RESET}  Applications menu  →  Docker Control Panel"
-fi
+echo -e "    ${CYAN}1.${RESET}  Applications menu  →  Docker Control Panel"
 echo -e "    ${CYAN}2.${RESET}  Terminal            →  ${BOLD}docker-gui${RESET}"
 echo -e "    ${CYAN}3.${RESET}  Direct              →  ${DIM}${SCRIPT_DIR}/docker-gui${RESET}"
 echo
 case ":$PATH:" in
     *":$HOME/.local/bin:"*) ;;
-    *) echo -e "  ${DIM}Tip: add ~/.local/bin to PATH (open a new terminal) to use 'docker-gui' in a shell.${RESET}"; echo ;;
+    *) echo -e "  ${DIM}Tip: add ~/.local/bin to PATH (log out and in again) to use 'docker-gui' in a shell.${RESET}"; echo ;;
 esac
+echo -e "  ${BOLD}Privacy & Terms${RESET}"
+echo -e "  ${DIM}Docker Control Panel has no telemetry and keeps its data on your computer. Please read${RESET}"
+echo -e "  ${DIM}${SCRIPT_DIR}/PRIVACY.md and TERMS.md; the app shows both on first start${RESET}"
+echo -e "  ${DIM}(and from its Docker home page) and asks you to accept before it runs.${RESET}"
+echo

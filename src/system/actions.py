@@ -28,8 +28,7 @@ def show_builders(show_text_output_callback, show_loading_callback=None):
     def done(result):
         if "unknown command" in result.lower():
             result = ("The buildx plugin is not installed, so there are no builders to list.\n\n"
-                      "Install it with your package manager (Linux: docker-buildx, macOS / Windows: it is part of\n"
-                      "Docker Desktop - update Docker Desktop).")
+                      "Install it with:  sudo apt install docker-buildx")
         show_text_output_callback(f"Builders\n\n{result}")
 
     async_run(DOCKER_BUILDX_LS, done, sudo=True, sudo_password=get_sudo_password(),
