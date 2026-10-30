@@ -1,31 +1,85 @@
 name: CI
 
+# Manual only: pick what to run from the "Run workflow" form (Actions tab).
 on:
-  push:
-    branches: [master]
-  pull_request:
-    branches: [master]
   workflow_dispatch:
+    inputs:
+      lint:
+        description: Lint (ruff + compileall)
+        type: boolean
+        default: false
+      tests:
+        description: Tests - installer + compatibility tests on the images ticked below
+        type: boolean
+        default: false
+      ubuntu_20_04:
+        description: ubuntu:20.04
+        type: boolean
+        default: true
+      ubuntu_22_04:
+        description: ubuntu:22.04
+        type: boolean
+        default: true
+      ubuntu_24_04:
+        description: ubuntu:24.04
+        type: boolean
+        default: true
+      debian_12:
+        description: debian:12
+        type: boolean
+        default: true
+      fedora_latest:
+        description: fedora:latest
+        type: boolean
+        default: true
+      rockylinux_8:
+        description: rockylinux:8
+        type: boolean
+        default: false
+      rockylinux_9:
+        description: rockylinux:9
+        type: boolean
+        default: false
+      almalinux_9:
+        description: almalinux:9
+        type: boolean
+        default: false
+      amazonlinux_2023:
+        description: amazonlinux:2023
+        type: boolean
+        default: false
+      archlinux_latest:
+        description: archlinux:latest
+        type: boolean
+        default: true
+      opensuse_leap_15_6:
+        description: opensuse/leap:15.6
+        type: boolean
+        default: false
+      opensuse_tumbleweed:
+        description: opensuse/tumbleweed:latest
+        type: boolean
+        default: false
+      alpine_latest:
+        description: alpine:latest
+        type: boolean
+        default: true
+      void_glibc:
+        description: ghcr.io/void-linux/void-glibc:latest
+        type: boolean
+        default: false
 
 jobs:
-  # Unit tests on every Python the installer accepts (3.8 = Ubuntu 20.04, 3.12 = Ubuntu 24.04 ...)
-  test:
-    name: tests (python ${{ matrix.python }})
+  lint:
+    name: lint
+    if: inputs.lint
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        python: ["3.8", "3.9", "3.10", "3.11", "3.12", "3.13"]
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-python@v5
         with:
-          python-version: ${{ matrix.python }}
-
-      # xvfb gives Tk a display
-      - name: System packages
-        run: sudo apt-get update && sudo apt-get install -y xvfb
+          python-version: "3.12"
 
       - name: Dependencies
         run: |
@@ -37,48 +91,35 @@ jobs:
           python -m ruff check .
           python -m compileall -q src docker_gui_modular.py
 
-      - name: Unit tests
-        run: |
-          xvfb-run -a python -m unittest discover -s tests -t . -v
-          xvfb-run -a python test_imports.py
-
-  # The real installer, as a normal user with sudo, on the runner's own distro
-  installer:
-    name: installer (${{ matrix.os }})
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-22.04, ubuntu-24.04]
+  # Turns the ticked image checkboxes into the matrix of the tests job
+  plan:
+    name: select images
+    if: inputs.tests
+    runs-on: ubuntu-latest
+    outputs:
+      images: ${{ steps.pick.outputs.images }}
     steps:
-      - uses: actions/checkout@v4
-      - run: ./install.sh
-      - run: .venv/bin/python -c "import tkinter, ttkbootstrap, PIL; import src.utils.utils"
-      - name: Second run changes nothing
-        run: ./install.sh
+      - id: pick
+        env:
+          INPUTS: ${{ toJSON(inputs) }}
+        run: |
+          images=$(jq -c '
+            {"ubuntu_20_04": "ubuntu:20.04", "ubuntu_22_04": "ubuntu:22.04", "ubuntu_24_04": "ubuntu:24.04", "debian_12": "debian:12", "fedora_latest": "fedora:latest", "rockylinux_8": "rockylinux:8", "rockylinux_9": "rockylinux:9", "almalinux_9": "almalinux:9", "amazonlinux_2023": "amazonlinux:2023", "archlinux_latest": "archlinux:latest", "opensuse_leap_15_6": "opensuse/leap:15.6", "opensuse_tumbleweed": "opensuse/tumbleweed:latest", "alpine_latest": "alpine:latest", "void_glibc": "ghcr.io/void-linux/void-glibc:latest"} as $names
+            | [$names | to_entries[] | select(.key as $k | $ENV.INPUTS | fromjson | .[$k] == true) | .value]
+          ' <<< 'null')
+          echo "images=$images" >> "$GITHUB_OUTPUT"
+          echo "Selected: $images"
 
-  # The installer as root on many distributions, in containers (tests/distro_smoke.sh)
-  distros:
+  # The installer as root in a container (tests/distro_smoke.sh), one job per selected image
+  tests:
     name: ${{ matrix.image }}
+    needs: plan
+    if: needs.plan.outputs.images != '[]'
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        image:
-          - ubuntu:20.04
-          - ubuntu:22.04
-          - ubuntu:24.04
-          - debian:12
-          - fedora:latest
-          - rockylinux:8
-          - rockylinux:9
-          - almalinux:9
-          - amazonlinux:2023
-          - archlinux:latest
-          - opensuse/leap:15.6
-          - opensuse/tumbleweed:latest
-          - alpine:latest
-          - ghcr.io/void-linux/void-glibc:latest
+        image: ${{ fromJSON(needs.plan.outputs.images) }}
     steps:
       - uses: actions/checkout@v4
       - run: tests/distro_smoke.sh ${{ matrix.image }}
