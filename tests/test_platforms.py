@@ -160,12 +160,17 @@ class TestSudoPerPlatform(unittest.TestCase):
 
     def test_run_cmd_does_not_prefix_sudo_on_macos(self):
         from src.utils.utils import run_cmd
-        with patch.object(plat, "IS_LINUX", False), patch.object(plat, "IS_MAC", True), \
-                patch("src.utils.utils.subprocess.check_output", return_value="ok\n") as out, \
-                patch("src.utils.utils.subprocess.Popen") as popen:
+        patches = _as("mac") + [patch("src.utils.utils.subprocess.check_output", return_value="ok\n"),
+                                patch("src.utils.utils.subprocess.Popen")]
+        started = [p.start() for p in patches]
+        try:
             run_cmd("docker ps", sudo=True, sudo_password="pw")
-        popen.assert_not_called()
-        self.assertEqual(out.call_args[0][0], "docker ps")
+            out, popen = started[3], started[4]
+            popen.assert_not_called()
+            self.assertEqual(out.call_args[0][0], "docker ps")
+        finally:
+            for p in patches:
+                p.stop()
 
     def test_keyring_is_linux_only(self):
         from src.config import config_manager as cm

@@ -53,8 +53,9 @@ def write_script(lines):
     """Write `lines` to an executable temp script for this OS's shell (a bash script with a shebang,
     or a .cmd batch file) and return its path. The caller deletes it."""
     windows = plat.IS_WIN
+    # explicit newline: Python would otherwise translate "\n" itself on a Windows host
     with tempfile.NamedTemporaryFile(mode="w", suffix=script_suffix(), delete=False,
-                                     newline="\r\n" if windows else None) as script:
+                                     newline="\r\n" if windows else "\n") as script:
         if not windows:
             script.write("#!/bin/bash\n")
         script.write("\n".join(lines) + "\n")
