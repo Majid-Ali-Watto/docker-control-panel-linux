@@ -35,25 +35,12 @@ def update_docker_status(root, status_var):
         status_var.set("Docker Status: Stopped ❌")
 
 
-def _wait_for_docker(up, seconds):
-    """Poll until the daemon is up (or down), up to `seconds`; Docker Desktop takes a while to boot."""
-    for _ in range(seconds):
-        if docker_service_active() == up:
-            return
-        time.sleep(1)
-
-
 def _run_service_action(action):
-    """Start / stop / restart the Docker daemon with whatever this OS uses; the result text."""
-    manager = plat.service_manager()
-    if manager == "systemd":
-        return run_cmd(f"systemctl {action} docker.socket docker.service",
-                       sudo=True, sudo_password=get_sudo_password())
-    if manager == "desktop":
-        result = plat.docker_desktop_action(action)
-        _wait_for_docker(action != "stop", 120)
-        return result
-    return plat.no_service_manager_text(action)
+    """Start / stop / restart the Docker daemon with this system's init system; the result text."""
+    command = plat.service_command(action)
+    if command is None:
+        return plat.no_service_manager_text(action)
+    return run_cmd(command, sudo=True, sudo_password=get_sudo_password())
 
 
 def _service_task(action, title, settle, root, status_var, show_loading_callback, show_text_output_callback):

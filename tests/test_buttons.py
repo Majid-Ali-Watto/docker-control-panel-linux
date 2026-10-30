@@ -11,7 +11,6 @@ Run with:
 """
 
 import sys
-import json
 import unittest
 from unittest.mock import patch, MagicMock
 
@@ -88,21 +87,6 @@ def _table_cb():
 # Base test class
 # ---------------------------------------------------------------------------
 
-
-_PLATFORM_PATCHERS = []
-
-
-def setUpModule():
-    from tests import pretend_linux
-    _PLATFORM_PATCHERS.extend(pretend_linux())
-
-
-def tearDownModule():
-    for patcher in _PLATFORM_PATCHERS:
-        patcher.stop()
-    _PLATFORM_PATCHERS.clear()
-
-
 class _Base(unittest.TestCase):
     def setUp(self):
         self.root = tk.Tk()
@@ -120,6 +104,13 @@ class _Base(unittest.TestCase):
 # ===========================================================================
 
 class TestDockerServiceButtons(_Base):
+
+    def setUp(self):
+        super().setUp()
+        from src.docker import actions
+        patcher = patch.object(actions.plat, 'service_manager', return_value='systemd')   # whatever init the host has
+        patcher.start()
+        self.addCleanup(patcher.stop)
 
     @patch('src.docker.actions.startThreadForTask', side_effect=_sync_thread)
     @patch('src.docker.actions.update_docker_status')
@@ -540,8 +531,7 @@ class TestComposeRetainedProjects(_Base):
         with tempfile.TemporaryDirectory() as d:
             f = os.path.join(d, 'docker-compose.yml')
             open(f, 'w').close()
-            listed = json.dumps([{"Name": "x", "Status": "running(1)", "ConfigFiles": f}])   # paths may hold backslashes
-            rows = self._rows([[f]], listed)
+            rows = self._rows([[f]], '[{"Name":"x","Status":"running(1)","ConfigFiles":"%s"}]' % f)
         self.assertEqual([r[0] for r in rows], ['x'])
 
     def test_saved_project_with_missing_files_hidden(self):
@@ -1684,9 +1674,6 @@ class TestDateFilterAndSort(_TableFixture):
         self.assertEqual(len(self._names()), 3)
 
     def _open_popup(self):
-        # a popup owned by a withdrawn window is never mapped on Windows, so show the window like a user sees it
-        self.root.deiconify()
-        self.root.update()
         self.dm._filter_btn.invoke()
         popup = self.dm._filter_popup
         popup.update()
@@ -2014,9 +2001,7 @@ class TestFormatCell(unittest.TestCase):
         self.assertEqual(self.fmt("STATUS", "running(2), exited(1)"), "running (2), exited (1)")
         self.assertEqual(self.fmt("STATUS", "Exited (137) 25 hours ago"), "Exited (137) 25 hours ago")
         home = os.path.expanduser("~")
-        inside = os.path.join("a", "x.yml")
-        self.assertEqual(self.fmt("CONFIG FILES", f"{os.path.join(home, inside)},/tmp/y.yml"),
-                         f"~/{inside}, /tmp/y.yml")
+        self.assertEqual(self.fmt("CONFIG FILES", f"{home}/a/x.yml,/tmp/y.yml"), "~/a/x.yml, /tmp/y.yml")
 
 
 class TestPopupMenu(_Base):

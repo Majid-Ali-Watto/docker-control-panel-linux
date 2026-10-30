@@ -16,9 +16,9 @@ SIDEBAR_TOOLTIPS = {
 
 CATEGORY_TOOLTIPS = {
     "Docker": {
-        "Start": "Start the Docker service\n(systemctl on Linux, Docker Desktop on macOS / Windows)",
-        "Stop": "Stop the Docker service\n(systemctl on Linux, Docker Desktop on macOS / Windows)",
-        "Restart": "Restart the Docker service\n(systemctl on Linux, Docker Desktop on macOS / Windows)",
+        "Start": "Start the Docker service\n(systemctl; OpenRC, runit or SysV where there is no systemd)",
+        "Stop": "Stop the Docker service\n(systemctl; OpenRC, runit or SysV where there is no systemd)",
+        "Restart": "Restart the Docker service\n(systemctl; OpenRC, runit or SysV where there is no systemd)",
         "Clean All": "Stop and permanently delete ALL\ncontainers, images, and volumes",
     },
     "Containers": {

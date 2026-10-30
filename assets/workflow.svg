@@ -1,0 +1,93 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 392" width="1000" height="392" role="img"
+     aria-label="How Docker Control Panel works: the app builds a docker command, the docker CLI sends it to the Docker Engine, which manages containers, images, volumes and networks">
+  <title>How Docker Control Panel works</title>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0 L10 5 L0 10 Z" fill="#8b949e"/>
+    </marker>
+    <style>
+      text { font-family: "DejaVu Sans", "Segoe UI", Arial, sans-serif; }
+      .h1 { font-size: 21px; font-weight: 700; fill: #e6edf3; }
+      .sub { font-size: 13px; fill: #8b949e; }
+      .t { font-size: 15px; font-weight: 700; fill: #e6edf3; }
+      .d { font-size: 12px; fill: #c9d1d9; }
+      .dim { font-size: 11.5px; fill: #8b949e; }
+      .code { font-family: "DejaVu Sans Mono", "Consolas", monospace; font-size: 11.5px; fill: #79c0ff; }
+      .num { font-size: 13px; font-weight: 700; fill: #0d1117; }
+      .box { fill: #161b22; stroke: #30363d; stroke-width: 1.5; }
+      .flow { stroke: #8b949e; stroke-width: 2; fill: none; marker-end: url(#arrow); }
+      .back { stroke: #6e7681; stroke-width: 1.6; fill: none; stroke-dasharray: 5 4; marker-end: url(#arrow); }
+    </style>
+  </defs>
+
+  <rect x="1" y="1" width="998" height="390" rx="18" fill="#0d1117" stroke="#30363d" stroke-width="2"/>
+  <text x="32" y="44" class="h1">How Docker Control Panel works</text>
+  <text x="32" y="66" class="sub">Every button runs a real docker command. Nothing is simulated, so what you see is what Docker reports.</text>
+
+  <!-- 1  the app -->
+  <rect class="box" x="32" y="92" width="196" height="136" rx="12"/>
+  <rect x="32" y="92" width="196" height="6" rx="3" fill="#4ea8f7"/>
+  <circle cx="54" cy="122" r="12" fill="#4ea8f7"/><text x="54" y="127" text-anchor="middle" class="num">1</text>
+  <text x="74" y="127" class="t">The app</text>
+  <text x="48" y="156" class="d">Tkinter desktop window</text>
+  <text x="48" y="176" class="d">Tables, dialogs, terminal</text>
+  <text x="48" y="196" class="d">Settings: engine, theme</text>
+  <text x="48" y="216" class="dim">Python · ttkbootstrap</text>
+
+  <!-- 2  docker CLI -->
+  <rect class="box" x="280" y="92" width="196" height="136" rx="12"/>
+  <rect x="280" y="92" width="196" height="6" rx="3" fill="#3fb950"/>
+  <circle cx="302" cy="122" r="12" fill="#3fb950"/><text x="302" y="127" text-anchor="middle" class="num">2</text>
+  <text x="322" y="127" class="t">docker CLI</text>
+  <text x="296" y="156" class="code">docker ps -a</text>
+  <text x="296" y="176" class="code">docker compose up -d</text>
+  <text x="296" y="196" class="d">via sudo -S when needed</text>
+  <text x="296" y="216" class="dim">direct in the docker group</text>
+
+  <!-- 3  Docker Engine -->
+  <rect class="box" x="528" y="92" width="196" height="136" rx="12"/>
+  <rect x="528" y="92" width="196" height="6" rx="3" fill="#d29922"/>
+  <circle cx="550" cy="122" r="12" fill="#d29922"/><text x="550" y="127" text-anchor="middle" class="num">3</text>
+  <text x="570" y="127" class="t">Docker Engine</text>
+  <text x="544" y="156" class="d">dockerd daemon</text>
+  <text x="544" y="176" class="code">/var/run/docker.sock</text>
+  <text x="544" y="196" class="d">or the active docker context</text>
+  <text x="544" y="216" class="dim">Podman too (experimental)</text>
+
+  <!-- 4  resources -->
+  <rect class="box" x="776" y="92" width="196" height="136" rx="12"/>
+  <rect x="776" y="92" width="196" height="6" rx="3" fill="#a371f7"/>
+  <circle cx="798" cy="122" r="12" fill="#a371f7"/><text x="798" y="127" text-anchor="middle" class="num">4</text>
+  <text x="818" y="127" class="t">Your Docker</text>
+  <text x="792" y="156" class="d">Containers and images</text>
+  <text x="792" y="176" class="d">Volumes and networks</text>
+  <text x="792" y="196" class="d">Compose projects</text>
+  <text x="792" y="216" class="dim">live stats · logs · events</text>
+
+  <!-- forward arrows with labels -->
+  <path class="flow" d="M230 144 H278"/><text x="254" y="136" text-anchor="middle" class="dim">runs</text>
+  <path class="flow" d="M478 144 H526"/><text x="502" y="136" text-anchor="middle" class="dim">API</text>
+  <path class="flow" d="M726 144 H774"/><text x="750" y="136" text-anchor="middle" class="dim">owns</text>
+  <!-- results travel back -->
+  <path class="back" d="M774 202 H726"/><path class="back" d="M526 202 H478"/><path class="back" d="M278 202 H230"/>
+  <text x="502" y="246" text-anchor="middle" class="dim">output comes back and is shown as a table or text</text>
+
+  <!-- extras -->
+  <text x="32" y="284" class="sub">Also in the app</text>
+
+  <rect class="box" x="32" y="296" width="296" height="72" rx="12"/>
+  <text x="48" y="320" class="t">Docker service buttons</text>
+  <text x="48" y="340" class="d">Start, Stop, Restart via your init system:</text>
+  <text x="48" y="357" class="code">systemd · OpenRC · runit · SysV</text>
+
+  <rect class="box" x="352" y="296" width="296" height="72" rx="12"/>
+  <text x="368" y="320" class="t">Live views are streamed</text>
+  <text x="368" y="340" class="d">Logs, events, pulls and builds stream live:</text>
+  <text x="368" y="357" class="code">logs --follow · events · stats</text>
+
+  <rect class="box" x="672" y="296" width="296" height="72" rx="12"/>
+  <text x="688" y="320" class="t">Container terminal</text>
+  <text x="688" y="340" class="d">Opens a shell in your terminal emulator:</text>
+  <text x="688" y="357" class="code">docker exec -it &lt;container&gt; bash</text>
+</svg>

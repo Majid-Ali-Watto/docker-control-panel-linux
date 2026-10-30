@@ -3,13 +3,11 @@ UI Components Module
 Reusable UI components and dialogs.
 """
 
-import shutil
 import subprocess
 import tkinter as tk
-import webbrowser
 from tkinter import ttk, messagebox
 
-from src.utils import platform_utils as plat, terminals
+from src.utils import terminals
 
 
 class Tooltip:
@@ -155,38 +153,24 @@ def prompt_password_dialog(root, on_success_callback):
     return True
 
 
-# Linux: install Docker with whichever package manager this distribution has
-_LINUX_INSTALL_DOCKER = [
+# Install Docker with whichever package manager and init system this distribution has
+_INSTALL_DOCKER = [
     "echo 'Installing Docker...'",
     "if command -v apt-get >/dev/null; then sudo apt-get update && sudo apt-get install -y docker.io;"
-    " elif command -v dnf >/dev/null; then sudo dnf install -y moby-engine;"
+    " elif command -v dnf >/dev/null; then sudo dnf install -y moby-engine || sudo dnf install -y docker;"
+    " elif command -v yum >/dev/null; then sudo yum install -y docker;"
     " elif command -v pacman >/dev/null; then sudo pacman -S --needed --noconfirm docker;"
     " elif command -v zypper >/dev/null; then sudo zypper --non-interactive install docker;"
+    " elif command -v apk >/dev/null; then sudo apk add docker;"
+    " elif command -v xbps-install >/dev/null; then sudo xbps-install -Sy docker;"
     " else echo 'No supported package manager - see https://docs.docker.com/engine/install/'; fi",
-    "sudo systemctl enable --now docker",
-    "echo 'Docker installation complete! Please restart this application.'",
+    "if [ -d /run/systemd/system ]; then sudo systemctl enable --now docker;"
+    " elif command -v rc-update >/dev/null; then sudo rc-update add docker default; sudo rc-service docker start;"
+    " elif [ -d /etc/sv/docker ]; then sudo ln -sf /etc/sv/docker /var/service/; fi",
+    "echo 'Docker installation finished. Please restart this application.'",
     "echo 'Press Enter to close...'",
     "read",
 ]
-
-
-def _docker_install_script():
-    """Script lines that install Docker on this OS, or None when it is a manual download (no
-    package manager to drive: Homebrew on macOS, winget on Windows)."""
-    if plat.IS_MAC:
-        if shutil.which("brew"):
-            return ["echo 'Installing Docker Desktop...'", "(brew install --cask docker-desktop || brew install --cask docker) && open -a Docker",
-                    "echo 'Docker Desktop is starting. Finish its first-run setup, then restart this application.'",
-                    "echo 'Press Enter to close...'", "read"]
-        return None
-    if plat.IS_WIN:
-        if shutil.which("winget"):
-            return ["@echo off", "echo Installing Docker Desktop...",
-                    "winget install -e --id Docker.DockerDesktop --accept-source-agreements --accept-package-agreements",
-                    "echo.", "echo Docker Desktop installed. Restart Windows if asked, start Docker Desktop,",
-                    "echo then restart this application.", "pause"]
-        return None
-    return _LINUX_INSTALL_DOCKER
 
 
 def prompt_docker_installation():
@@ -199,20 +183,11 @@ def prompt_docker_installation():
     if not response:
         return False
 
-    lines = _docker_install_script()
-    if lines is None:
-        webbrowser.open_new_tab(plat.DOCKER_DESKTOP_URL)
-        messagebox.showinfo("Install Docker Desktop",
-                            f"Download and install Docker Desktop from:\n\n{plat.DOCKER_DESKTOP_URL}\n\n"
-                            "then restart this application.")
-        return False
-
-    script = terminals.write_script(lines)
-    ok, _error = terminals.launch(script, "Install Docker")
+    ok, _error = terminals.launch(terminals.write_script(_INSTALL_DOCKER), "Install Docker")
     if not ok:
         messagebox.showwarning(
             "Terminal Not Found",
-            "Could not open a terminal.\n\nInstall Docker manually: https://docs.docker.com/get-docker/")
+            "Could not open a terminal.\n\nInstall Docker manually: https://docs.docker.com/engine/install/")
     return False
 
 

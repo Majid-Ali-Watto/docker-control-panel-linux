@@ -4,30 +4,37 @@ Instructions for AI coding agents (OpenAI Codex, Codex CLI, and compatible tools
 
 ## What This Project Is
 
-A Python/Tkinter desktop GUI for managing Docker on Linux. Users control containers, images, volumes, networks, Compose projects, and Docker service state — all without typing docker commands manually. Docker runs through sudo with a saved password, unless the user is in the `docker` group (then no password is needed).
+A Python/Tkinter desktop GUI for managing Docker on **Linux (any distribution, Python 3.8+)**. Users control containers, images, volumes, networks, Compose projects, and Docker service state — all without typing docker commands manually. Docker runs through sudo with a saved password, unless the user is in the `docker` group (then no password is needed). Author: Majid Ali, Full Stack Developer (majidaliqau@gmail.com).
 
 ## How to Run
 
 ```bash
-python3 docker_gui_modular.py
-# or
-./docker-gui
+./install.sh            # once: system packages, Docker, .venv, desktop entry (any distro)
+./docker-gui            # or: docker-gui, or the Applications menu entry
 ```
 
-No package installation needed — stdlib and Tkinter only (plus ttkbootstrap for theming).
+Python dependencies are `ttkbootstrap` (pinned `<2`: 2.x breaks the rounded styling) and `pillow` (`requirements.txt`, installed into `.venv` by the installer); everything else is the standard library and Tkinter.
 
 ## Repository Structure
 
 ```
 docker-ui-modular/
 ├── docker_gui_modular.py        # Main entry point (DockerGUI class)
-├── docker-gui                   # Executable launcher
-├── install.sh                   # Desktop integration installer
+├── docker-gui                   # Launcher (plain POSIX sh)
+├── install.sh / uninstall.sh    # One-command installer for every mainstream distro / uninstaller
+├── requirements.txt             # ttkbootstrap, pillow (installed into .venv)
+├── PRIVACY.md / TERMS.md        # Generated from src/help/legal.py (python3 -m src.help.legal)
 ├── assets/
-│   └── docker-icon.svg          # App icon (SVG)
+│   ├── docker-icon.svg          # App icon, vector (installed to the hicolor icon theme; README)
+│   ├── docker-icon.png          # Same icon, 256 px (window icon, home-page hero) — re-render from the SVG when it changes
+│   └── workflow.svg             # "How it works" diagram (README)
 ├── tests/
 │   ├── test_buttons.py          # Unit tests: command constants and GUI wiring (no daemon needed)
-│   └── test_new_features.py     # Unit tests: settings, keyring storage, engine, events, registry, System category
+│   ├── test_new_features.py     # Unit tests: settings, keyring storage, engine, events, registry, System category
+│   ├── test_linux_compat.py     # Unit tests: init systems, service buttons, status, terminals, Python 3.8
+│   ├── test_home_page.py        # Unit tests: "How it works" card, home tooltips, creator details, images
+│   ├── test_legal.py            # Unit tests: Privacy / Terms text, first-run acceptance, reader, home links
+│   └── distro_smoke.sh          # Runs the installer on real distro images (needs docker; used by CI)
 └── src/
     ├── config/
     │   ├── config_manager.py    # Password/config I/O (~/.docker-gui/config.json)
@@ -64,8 +71,8 @@ docker-ui-modular/
     ├── system/
     │   ├── actions.py           # Info, builders, prune build cache
     │   ├── dialogs.py           # Live events window
+    │   ├── overview.py          # gather_overview(): CLI, engine, socket, init, counts (home-page card)
     │   └── tables.py            # Docker contexts
-
     ├── shared/
     │   ├── context_menus.py     # Right-click menus for table and text views
     │   ├── helpers.py           # Shared formatting / argument-building utilities
@@ -74,15 +81,21 @@ docker-ui-modular/
     ├── ui/
     │   ├── ui_components.py     # Dialogs (password prompt, install prompt, Tooltip)
     │   ├── ui_display.py        # DisplayManager
+    │   ├── landing_page.py      # Docker home page (hero, service buttons with tooltips, live card, category cards)
+    │   ├── workflow_view.py     # "How it works" canvas card: app → CLI → engine → resources
+    │   ├── legal_view.py        # Privacy / Terms reader dialog + first-run agreement
     │   ├── settings_dialog.py   # Settings dialog
     │   ├── terminal_panel.py    # Embedded terminal panel
     │   └── keyboard_navigation.py
     ├── help/
     │   ├── help_commands.py     # Commands tab text
-    │   ├── help_creator.py      # Creator details
+    │   ├── help_creator.py      # Creator details (name, role, portfolio, GitHub, email)
+    │   ├── legal.py             # Privacy Policy + Terms text (source of the app pages and the .md files)
     │   └── help_info.py         # Help tab text
     └── utils/
-        ├── utils.py             # check_docker_installed, run_cmd, async_run, clean_subprocess_env
+        ├── utils.py             # check_docker_installed, run_cmd, async_run, docker_service_active, notify
+        ├── platform_utils.py    # service_manager (systemd/openrc/runit/sysv), service_command, package_manager, clean_subprocess_env
+        ├── terminals.py         # 17 terminal emulators: installed_terminals, write_script, launch
         └── threads.py           # Async operation helpers
 ```
 
@@ -90,7 +103,7 @@ docker-ui-modular/
 
 - **No top header bar.** The window is sidebar (left, 210 px) + main content (right).
 - **Sidebar top**: app title + Docker status label (bound to `docker_status_var`).
-- **Main content**: action toolbar (`btn_frame`) → Docker info panel (Docker category only) → output area.
+- **Main content**: action toolbar (`btn_frame`) → output area. The Docker category opens on the **home page** (`ui/landing_page.py`): hero + status, service buttons (Start / Stop / Restart / Clean All, all with tooltips), a live **"How it works"** card (`ui/workflow_view.py`, data from `system/overview.py`), and category cards.
 - **Output area**: `DisplayManager` owns it. Use `show_table()` / `show_text_output()` exclusively.
 
 ## Agent Constraints
@@ -105,10 +118,15 @@ docker-ui-modular/
 - Register new sidebar actions in `src/config/config_menu.py` → `get_menu_structure()`.
 - Use `ttk` widgets; fonts `JetBrains Mono` (monospace output) and `Arial` (labels).
 - Use `clean_subprocess_env()` from `utils.py` when launching external processes.
+- Keep it **Linux-generic**: Python 3.8 syntax and stdlib (no `str.removeprefix`, no `X | Y` unions); never call `systemctl` directly — use `platform_utils.service_command()`; no distro-specific package names or paths in app code (those belong in `install.sh`); new terminal emulators go in `terminals._TERMINALS`.
+- Give every new button a tooltip (`src/config/config_tooltips.py`), including home-page buttons.
+- Keep the Privacy Policy truthful: if a change stores new data or contacts a new server, update `src/help/legal.py`, bump `LEGAL_VERSION`, and run `python3 -m src.help.legal` to regenerate `PRIVACY.md` / `TERMS.md`.
+- Add every new `DOCKER_*` constant to `help_commands._DESCRIPTIONS`.
 
 ### Do Not
 
-- Add third-party dependencies — stdlib and Tkinter only (ttkbootstrap is already present).
+- Add third-party dependencies beyond `ttkbootstrap` and `pillow` (if you must, add it to `requirements.txt`).
+- Add Windows or macOS code paths — the project is Linux-only.
 - Create new top-level `.py` files.
 - Inline docker CLI strings anywhere outside `src/docker/commands.py`.
 - Call `subprocess` directly from UI or action modules — always go through `operations.py`.
@@ -159,16 +177,16 @@ Add an entry to `themes` in `src/config/config_themes.py` with keys:
 - Do not introduce `shell=True` subprocess calls with user-controlled strings.
 - **Every `run_cmd` call must pass `sudo=True, sudo_password=get_sudo_password()`** — omitting sudo causes silent permission failures when the user is not in the `docker` group.
 - Terminal launch must use a SUDO_ASKPASS helper (temp script, chmod 0700) and `sudo -A` so the interactive shell's stdin is not consumed by the password prompt.
+- Scripts written to disk use `#!/usr/bin/env bash` (not every distro has `/bin/bash`).
 
 ## Tests
 
-Tests live in `tests/test_buttons.py`. Run with:
-
 ```bash
-python3 -m unittest tests/test_buttons.py -v
+python3 -m unittest discover -s tests -t . -v     # needs a display (xvfb-run -a on CI)
+tests/distro_smoke.sh ubuntu:20.04 fedora:latest  # the installer on real distro images (needs docker)
 ```
 
-No real Docker daemon is needed — all docker calls are mocked with `unittest.mock.patch`.
+No real Docker daemon is needed — all docker calls are mocked with `unittest.mock.patch`. CI runs the suite on Python 3.8 – 3.13 and the installer on 14 distribution images.
 
 **Patch path rule**: patch where the name is bound, not where it is defined.
 - `check_docker_running` imported into `src.containers.actions` → patch `src.containers.actions.check_docker_running`

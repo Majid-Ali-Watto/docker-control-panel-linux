@@ -8,15 +8,17 @@ from tkinter import ttk
 
 from src.help.help_creator import (
     APP_BUILT_WITH, APP_NAME, APP_REQUIRES, APP_TAGLINE,
-    CREATOR_GITHUB_LABEL, CREATOR_GITHUB_URL, CREATOR_NAME,
+    CREATOR_EMAIL, CREATOR_EMAIL_URL, CREATOR_GITHUB_LABEL, CREATOR_GITHUB_URL, CREATOR_NAME,
     CREATOR_PORTFOLIO_LABEL, CREATOR_PORTFOLIO_URL, CREATOR_ROLE,
 )
 from src.ui.rounded import RoundedBadge, RoundedPanel, make
 from src.ui.scroll_frame import ScrollFrame
 
 _BG, _NAME, _ROLE, _AVATAR = "#0d1117", "#e6edf3", "#8a9fb5", "#2563eb"
-_LINKS = [("🌐", "Portfolio", CREATOR_PORTFOLIO_LABEL, CREATOR_PORTFOLIO_URL),
-          ("🐙", "GitHub", CREATOR_GITHUB_LABEL, CREATOR_GITHUB_URL)]
+# (icon, label, shown text, URL to open, text to copy: the address itself for mailto links)
+_LINKS = [("🌐", "Portfolio", CREATOR_PORTFOLIO_LABEL, CREATOR_PORTFOLIO_URL, CREATOR_PORTFOLIO_URL),
+          ("🐙", "GitHub", CREATOR_GITHUB_LABEL, CREATOR_GITHUB_URL, CREATOR_GITHUB_URL),
+          ("✉", "Email", CREATOR_EMAIL, CREATOR_EMAIL_URL, CREATOR_EMAIL)]
 
 
 def _initials(name):
@@ -37,7 +39,7 @@ def _profile(parent):
     make(tk.Label, text, text=CREATOR_ROLE, font=("Arial", 10), bg=_BG, fg=_ROLE).pack(anchor=tk.W, pady=(2, 0))
 
 
-def _link_card(parent, icon, label, text, url, open_link):
+def _link_card(parent, icon, label, text, url, copy_text, open_link):
     card = ttk.LabelFrame(parent, padding=(12, 10))
     card.pack(fill=tk.X, pady=4)
     ttk.Label(card, text=icon, font=("Arial", 18)).grid(row=0, column=0, rowspan=2, padx=(0, 12))
@@ -49,7 +51,7 @@ def _link_card(parent, icon, label, text, url, open_link):
 
     def copy_url():
         card.clipboard_clear()
-        card.clipboard_append(url)
+        card.clipboard_append(copy_text)
         copy.configure(text="✓ Copied")
         copy.after(1200, lambda: copy.winfo_exists() and copy.configure(text="Copy"))
 
@@ -79,8 +81,8 @@ def build_creator_tab(notebook, open_link):
     body = scroller.body
     _profile(body)
     ttk.Label(body, text="Links", font=("Arial", 11, "bold")).pack(anchor=tk.W, pady=(16, 4))
-    for icon, label, text, url in _LINKS:
-        _link_card(body, icon, label, text, url, open_link)
+    for icon, label, text, url, copy_text in _LINKS:
+        _link_card(body, icon, label, text, url, copy_text, open_link)
     ttk.Label(body, text="About", font=("Arial", 11, "bold")).pack(anchor=tk.W, pady=(16, 4))
     _about(body)
     return scroller

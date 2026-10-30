@@ -13,15 +13,17 @@ import webbrowser
 
 from src.utils import platform_utils
 
-# Before the first Tk call: platform setup (Linux: opt out of X input methods, which made first paint
-# ~11 s; Windows: DPI awareness; macOS / Windows: put Docker's bin folders on PATH)
+# Before the first Tk call: opt out of X input methods (they made first paint ~11 s)
 platform_utils.prepare_environment()
 
 # Prefer venv packages so ttkbootstrap uses the correct Pillow version
-for _pattern in platform_utils.venv_site_packages_globs():
-    for _p in glob.glob(os.path.join(os.path.dirname(os.path.abspath(__file__)), _pattern)):
-        if _p not in sys.path:
-            sys.path.insert(0, _p)
+_venv_pkgs = glob.glob(
+    os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                 '.venv', 'lib', 'python*', 'site-packages')
+)
+for _p in _venv_pkgs:
+    if _p not in sys.path:
+        sys.path.insert(0, _p)
 
 import tkinter as tk
 from tkinter import ttk, messagebox
@@ -56,6 +58,7 @@ from src.ui.ui_components import (
 from src.ui.ui_display import DisplayManager
 from src.ui.terminal_panel import TerminalPanel
 from src.ui.landing_page import LandingPage
+from src.ui.legal_view import ask_first_run, needs_acceptance, show_legal_dialog
 from src.ui.rounded import apply_rounded_styles, RoundedPanel, make, readable
 from src.ui.keyboard_navigation import (
     setup_keyboard_navigation,
@@ -115,6 +118,8 @@ class DockerGUI:
             themename=themes[self.initial_theme]["ttkbs_theme"]
         )
         
+        self._set_window_icon()
+
         # Setup window geometry
         self.root.update_idletasks()
         screen_width = self.root.winfo_screenwidth()
@@ -150,6 +155,11 @@ class DockerGUI:
         self.create_widgets()
         self.setup_keyboard_nav()
         
+        # First start (or the Privacy Policy / Terms changed): ask the user to read and accept them
+        if needs_acceptance() and not ask_first_run(self.root):
+            self.root.destroy()
+            sys.exit(0)
+
         # Check Docker installation
         if not check_docker_installed():
             prompt_docker_installation()
@@ -201,15 +211,21 @@ class DockerGUI:
         dm.update_action_buttons()
         self.landing.pack(fill=tk.BOTH, expand=True)
 
+    def _set_window_icon(self):
+        """The whale in the title bar / taskbar / Alt-Tab (assets/docker-icon.png)."""
+        path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets", "docker-icon.png")
+        try:
+            self._window_icon = tk.PhotoImage(file=path)      # keep a reference or Tk drops it
+            self.root.iconphoto(True, self._window_icon)
+        except (tk.TclError, OSError):
+            pass
+
     def _maximize(self):
         """Open maximised (title bar kept); the geometry above is the restored size."""
-        if platform_utils.IS_LINUX:
-            try:
-                self.root.attributes("-zoomed", True)  # X11 / Wayland
-                return
-            except tk.TclError:
-                pass
-        self.root.state("zoomed")                      # Windows / macOS
+        try:
+            self.root.attributes("-zoomed", True)      # X11 / Wayland (XWayland)
+        except tk.TclError:
+            self.root.state("zoomed")                  # window managers without the -zoomed attribute
 
     def setup_styles(self):
         """Setup TTK styles via ttkbootstrap"""
@@ -457,29 +473,28 @@ class DockerGUI:
         bottom_frame = ttk.Frame(parent)
         bottom_frame.pack(side=tk.BOTTOM, fill=tk.X, padx=10, pady=10)
         
-        # Password management (sudo exists on Linux only; Docker Desktop never asks for one)
-        if platform_utils.uses_sudo():
-            password_frame = ttk.LabelFrame(bottom_frame, text="🔑 Password", padding=5)
-            password_frame.pack(fill=tk.X, pady=(0, 8))
+        # Password management
+        password_frame = ttk.LabelFrame(bottom_frame, text="🔑 Password", padding=5)
+        password_frame.pack(fill=tk.X, pady=(0, 8))
         
-            password_status = ttk.Label(
-                password_frame,
-                text=(f"● Saved ({password_storage()})" if has_saved_password() else "○ Not Saved"),
-                font=("Arial", 8)
-            )
-            password_status.pack(pady=2)
+        password_status = ttk.Label(
+            password_frame,
+            text=(f"● Saved ({password_storage()})" if has_saved_password() else "○ Not Saved"),
+            font=("Arial", 8)
+        )
+        password_status.pack(pady=2)
         
-            pw_btn_row = ttk.Frame(password_frame)
-            pw_btn_row.pack()
-            btn_change = ttk.Button(pw_btn_row, text="Change", style="secondary.TButton",
-                                    command=lambda: change_password_dialog(self.root), width=8)
-            btn_change.pack(side=tk.LEFT, padx=2, pady=2)
-            Tooltip(btn_change, SIDEBAR_BOTTOM_TOOLTIPS["change_password"])
+        pw_btn_row = ttk.Frame(password_frame)
+        pw_btn_row.pack()
+        btn_change = ttk.Button(pw_btn_row, text="Change", style="secondary.TButton",
+                                command=lambda: change_password_dialog(self.root), width=8)
+        btn_change.pack(side=tk.LEFT, padx=2, pady=2)
+        Tooltip(btn_change, SIDEBAR_BOTTOM_TOOLTIPS["change_password"])
 
-            btn_del_pw = ttk.Button(pw_btn_row, text="Delete", style="danger.Outline.TButton",
-                                    command=delete_password_dialog, width=8)
-            btn_del_pw.pack(side=tk.LEFT, padx=2, pady=2)
-            Tooltip(btn_del_pw, SIDEBAR_BOTTOM_TOOLTIPS["delete_password"])
+        btn_del_pw = ttk.Button(pw_btn_row, text="Delete", style="danger.Outline.TButton",
+                                command=delete_password_dialog, width=8)
+        btn_del_pw.pack(side=tk.LEFT, padx=2, pady=2)
+        Tooltip(btn_del_pw, SIDEBAR_BOTTOM_TOOLTIPS["delete_password"])
 
         # Settings button
         btn_settings = ttk.Button(bottom_frame, text="⚙ Settings", style="secondary.TButton",
@@ -538,6 +553,9 @@ class DockerGUI:
             [(label, self._landing_action(callback)) for label, callback in self.menu_structure["Docker"]],
             lambda category: self.make_sidebar_command(category)(),
             available=self.menu_structure.keys(),
+            button_tips=CATEGORY_TOOLTIPS.get("Docker", {}),
+            category_tips=SIDEBAR_TOOLTIPS,
+            open_legal=lambda kind: show_legal_dialog(self.root, kind),
         )
 
         # Setup action buttons
@@ -569,9 +587,10 @@ class DockerGUI:
         return help_panel
 
     def open_external_link(self, url):
-        """Open an external link in the default browser."""
+        """Open an external link (http, or mailto: in the mail app) with the desktop's default handler."""
         try:
-            webbrowser.open_new_tab(url)
+            if not webbrowser.open_new_tab(url):
+                raise RuntimeError("no handler")
         except Exception:
             messagebox.showerror("Open Link", f"Could not open link:\n{url}")
     

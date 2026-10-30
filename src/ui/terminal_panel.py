@@ -8,8 +8,6 @@ import threading
 import tkinter as tk
 from tkinter import ttk
 
-from src.utils import platform_utils as plat
-
 
 class TerminalPanel(tk.Frame):
     """
@@ -196,7 +194,6 @@ class TerminalPanel(tk.Frame):
                     cwd=self._cwd,
                     text=True,
                     bufsize=1,
-                    **plat.popen_flags(),
                 )
                 with self._proc_lock:
                     self._running_proc = proc
