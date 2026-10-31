@@ -67,20 +67,24 @@ def launch(script, title, preferred=None):
     names.sort(key=lambda n: n != preferred)    # stable: the Settings choice goes first
     last_error = None
     for name in names:
-        try:
-            process = subprocess.Popen(_TERMINALS[name](title, script), stdout=subprocess.PIPE,
-                                       stderr=subprocess.PIPE, start_new_session=True,
-                                       cwd=os.path.expanduser("~"), env=plat.clean_subprocess_env())
-            try:   # an emulator that dies at once (missing display, bad flag) is not a success
-                code = process.wait(timeout=0.5)
-            except subprocess.TimeoutExpired:
-                return True, None
-            if code == 0:
-                return True, None
-            detail = process.stderr.read().decode("utf-8", errors="ignore")[:100] if process.stderr else ""
-            last_error = f"{name}: exited with code {code}" + (f" - {detail}" if detail else "")
-        except FileNotFoundError:
-            last_error = f"{name}: not found"
-        except OSError as exc:
-            last_error = f"{name}: {exc}"
+        # stderr goes to a file, not a pipe: nobody reads a pipe once the emulator is running, and
+        # a chatty one would block when the pipe buffer fills
+        with tempfile.TemporaryFile() as errors:
+            try:
+                process = subprocess.Popen(_TERMINALS[name](title, script), stdout=subprocess.DEVNULL,
+                                           stderr=errors, start_new_session=True,
+                                           cwd=os.path.expanduser("~"), env=plat.clean_subprocess_env())
+                try:   # an emulator that dies at once (missing display, bad flag) is not a success
+                    code = process.wait(timeout=0.5)
+                except subprocess.TimeoutExpired:
+                    return True, None
+                if code == 0:
+                    return True, None
+                errors.seek(0)
+                detail = errors.read(100).decode("utf-8", errors="ignore").strip()
+                last_error = f"{name}: exited with code {code}" + (f" - {detail}" if detail else "")
+            except FileNotFoundError:
+                last_error = f"{name}: not found"
+            except OSError as exc:
+                last_error = f"{name}: {exc}"
     return False, last_error

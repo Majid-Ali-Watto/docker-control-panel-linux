@@ -8,7 +8,7 @@ import tkinter as tk
 from datetime import datetime, timedelta
 from tkinter import ttk
 from tkinter import font as tkfont
-from src.ui.rounded import RoundedBadge, readable_color
+from src.ui.rounded import RoundedBadge, tone_color
 from src.ui.cell_format import DATE_COLUMNS, DOCKER_DATE, format_cell, status_tone
 from src.ui.table_cells import CellSelection
 from src.ui.datetime_picker import DATE_FORMAT, pick_datetime
@@ -105,13 +105,13 @@ class DisplayManager:
                 pass
             self.live_stats_job = None
     
-    _STATUS_COLORS = {"bad": "#dc3545", "warn": "#d98200", "ok": "#2e9e5b"}
+    _STATUS_TONES = {"bad": "danger", "warn": "warning", "ok": "success"}
 
     def apply_status_colors(self):
         """Text colours for rows whose container needs attention (re-run on every theme change,
         since legibility depends on the surface behind the text)."""
-        for tone, color in self._STATUS_COLORS.items():
-            self.table_widget.tag_configure(f"status_{tone}", foreground=readable_color(color))
+        for status, tone in self._STATUS_TONES.items():
+            self.table_widget.tag_configure(f"status_{status}", foreground=tone_color(tone))
 
     def clear_table(self):
         """Clear all items from table"""
@@ -152,9 +152,16 @@ class DisplayManager:
 
     @classmethod
     def _parse_row_date(cls, text):
-        """Parse docker's CreatedAt text (e.g. '2026-10-15 15:06:49 +0500 PKT'); None if absent."""
+        """Parse docker's CreatedAt text (e.g. '2026-10-15 15:06:49 +0500 PKT') or a relative age
+        ('2 weeks ago', Docker Disk Usage tabs) as a time; None if neither."""
         m = cls._DOCKER_DATE.search(str(text))
-        return datetime(*map(int, m.groups())) if m else None
+        if m:
+            return datetime(*map(int, m.groups()))
+        age = cls._AGE.match(str(text).strip())
+        if age:
+            count = 1 if age.group(1).lower() in ("a", "an") else int(age.group(1))
+            return datetime.now() - timedelta(seconds=count * cls._AGE_SECONDS[age.group(2).lower()])
+        return None
 
     @staticmethod
     def _parse_user_date(text, end_of_day=False):
@@ -233,11 +240,18 @@ class DisplayManager:
         return [format_cell(self._columns[i] if i < len(self._columns) else "", v)
                 for i, v in enumerate(row)]
 
+    def _key_of(self, row):
+        """Identity of a row, stable across reloads: its first column plus any TAG / ... ID column
+        (the first column alone repeats — every dangling image is REPOSITORY `<none>`)."""
+        cols = [0] + [i for i, c in enumerate(self._columns)
+                      if i and (c == "TAG" or c == "ID" or c.endswith(" ID"))]
+        return tuple(str(row[i]) for i in cols if i < len(row))
+
     def _row_key(self, iid):
-        """Identity of a shown row (its first column), stable across reloads; None if unknown."""
+        """Identity of a shown row (see _key_of); None if unknown."""
         if iid is None or int(iid) >= len(self._shown) or not self._shown[int(iid)]:
             return None
-        return str(self._shown[int(iid)][0])
+        return self._key_of(self._shown[int(iid)])
 
     def _populate(self):
         """Fill the Treeview from the stored rows (filter + sort applied), keeping the selection
@@ -255,7 +269,7 @@ class DisplayManager:
                 tags.append(f"status_{tone}")
             shown = [t if t.strip() else self.EMPTY_CELL for t in self._formatted(row)]
             self.table_widget.insert("", tk.END, iid=str(idx - 1), values=[idx] + shown, tags=tuple(tags))
-        keep = [str(i) for i, row in enumerate(rows) if row and str(row[0]) in selected_keys]
+        keep = [str(i) for i, row in enumerate(rows) if row and self._key_of(row) in selected_keys]
         if keep:
             self.table_widget.selection_set(keep)
         self.cells.move_to_row(next((i for i in keep if self._row_key(i) == cell_key), None))
@@ -376,13 +390,13 @@ class DisplayManager:
             title_row = ttk.Frame(header)
             title_row.pack(fill=tk.X)
             ttk.Label(title_row, text=table_title, font=("Arial", 12, "bold"),
-                      foreground=readable_color("#0066cc")).pack(side=tk.LEFT)
+                      style="Accent.TLabel").pack(side=tk.LEFT)
             self._badge_noun = self._NOUNS.get(table_type, 'item')
             self._badge = RoundedBadge(title_row)
             self._badge.pack(side=tk.LEFT, padx=(10, 0))
             ttk.Label(title_row, text="Click a cell + Ctrl+C to copy · double-click: details · "
                                       "right-click: actions · Ctrl/Shift+click or Ctrl+A: multi-select",
-                      font=("Arial", 9, "italic"), foreground=readable_color("#6c757d")
+                      font=("Arial", 9, "italic"), style="Muted.TLabel"
                       ).pack(side=tk.RIGHT)
 
         if table_type not in self._FILTERABLE:

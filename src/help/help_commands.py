@@ -62,7 +62,7 @@ _DESCRIPTIONS = {
     # Container actions
     "DOCKER_START_ALL": "Start every container (Containers → Start All)",
     "DOCKER_STOP_ALL": "Stop every container (Containers → Stop All)",
-    "DOCKER_RESTART_ALL": "Restart every container (Containers → Restart All)",
+    "DOCKER_RESTART_ALL": "Restart every running container (Containers → Restart All)",
     "DOCKER_RM_ALL": "Force-remove every container (Containers → Delete All)",
     "DOCKER_STOP_ALL_SAFE": "Stop every container, ignoring errors (Docker → Clean All)",
     "DOCKER_RM_ALL_SAFE": "Remove every container, ignoring errors (Docker → Clean All)",
@@ -102,6 +102,7 @@ _DESCRIPTIONS = {
     # Volumes
     "DOCKER_VOLUME_LS_IDS": "Names of all volumes",
     "DOCKER_VOLUME_LS_DANGLING": "Names of volumes no container uses",
+    "DOCKER_PS_IDS_BY_VOLUME": "IDs of the containers that use a volume (Volumes → Delete Used)",
     "DOCKER_VOLUME_PRUNE": "Remove unused volumes (Volumes → Prune)",
     "DOCKER_VOLUME_RM_ALL": "Remove every volume (Volumes → Delete All)",
     "DOCKER_VOLUME_RM_ALL_SAFE": "Remove every volume, ignoring errors (Docker → Clean All)",
@@ -158,7 +159,7 @@ _EXTRA_APP_COMMANDS = {
         ("sv up|down|restart docker", "Same buttons on runit systems (Void)"),
         ("which docker", "Check that Docker is installed at startup"),
         ("docker info --format '{{.ServerVersion}}'", "Check whether sudo is needed at all (user is in the docker group), and the status on systems without systemd"),
-        ("sudo -S <command>", "How every command above is run: the saved sudo password is sent on stdin"),
+        ("sudo -S -k -p '' sh -c '<command>'", "How every command above is run: the saved sudo password is sent on stdin, and a root shell runs the whole command (so $(...) parts run as root too)"),
     ],
     "Container actions": [
         ("docker exec -it <container> /bin/sh", "Open a shell inside a container (Terminal action)"),

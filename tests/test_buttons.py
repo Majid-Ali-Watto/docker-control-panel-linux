@@ -23,7 +23,7 @@ from tkinter import ttk
 from src.docker.commands import (
     DOCKER_PS_RUNNING, DOCKER_PS_ALL, DOCKER_PS_STOPPED, DOCKER_PS_PAUSED,
     DOCKER_STATS_NO_STREAM, DOCKER_IMAGES_ALL, DOCKER_PS_IDS_ALL,
-    DOCKER_PS_IDS_RUNNING, DOCKER_PS_NAMES_ALL,
+    DOCKER_PS_NAMES_ALL,
     DOCKER_START_ALL, DOCKER_STOP_ALL, DOCKER_RESTART_ALL, DOCKER_RM_ALL,
     DOCKER_RMI_ALL, DOCKER_IMAGE_PRUNE,
     DOCKER_VOLUME_PRUNE, DOCKER_VOLUME_RM_ALL, DOCKER_DISK_STORAGE_SIMPLE,
@@ -593,7 +593,6 @@ _FAKE_DF_SIMPLE = (
 class TestStatsButtons(_Base):
 
     @patch('src.stats.tables.check_docker_running', return_value=True)
-    @patch('src.stats.tables.run_cmd', return_value='abc123')  # running container IDs
     def test_container_stats(self, *_):
         cb, calls = _table_cb()
         from src.stats.tables import show_containers_with_stats
@@ -605,11 +604,12 @@ class TestStatsButtons(_Base):
         self.assertEqual(len(calls[0]['rows']), 1)
 
     @patch('src.stats.tables.check_docker_running', return_value=True)
-    @patch('src.stats.tables.run_cmd', return_value='')  # no running containers
     def test_container_stats_empty_when_no_containers(self, *_):
         cb, calls = _table_cb()
         from src.stats.tables import show_containers_with_stats
-        show_containers_with_stats(cb, self.show_loading)
+        with patch('src.stats.tables.async_run',   # docker stats prints nothing when nothing runs
+                   side_effect=lambda *args, **_: args[1]('')):
+            show_containers_with_stats(cb, self.show_loading)
         self.assertTrue(calls)
         self.assertEqual(calls[0]['rows'], [])
 
@@ -779,20 +779,21 @@ class TestTableCommandRouting(_Base):
         show_docker_disk_storage_simple(MagicMock(), self.show_loading)
         self.assertEqual(mock_async.call_args[0][0], DOCKER_DISK_STORAGE_SIMPLE)
 
-    # --- internal run_cmd routing (DOCKER_PS_IDS_RUNNING, DOCKER_PS_IDS_ALL, DOCKER_PS_NAMES_ALL) ---
+    # --- internal run_cmd routing (DOCKER_PS_IDS_ALL, DOCKER_PS_NAMES_ALL) ---
 
     @patch('src.stats.tables.check_docker_running', return_value=True)
     @patch('src.stats.tables.get_sudo_password', return_value=FAKE_PW)
-    @patch('src.stats.tables.async_run')  # prevent actual async call
-    @patch('src.stats.tables.run_cmd', return_value='abc123')
-    def test_container_stats_checks_running_ids(self, mock_run, *_):
+    @patch('src.stats.tables.async_run')
+    def test_container_stats_runs_nothing_on_the_tk_thread(self, mock_async, *_):
+        # one async command; no synchronous `docker ps -q` blocking the window first
         from src.stats.tables import show_containers_with_stats
-        show_containers_with_stats(MagicMock(), self.show_loading)
-        mock_run.assert_called_once_with(DOCKER_PS_IDS_RUNNING, sudo=True, sudo_password=FAKE_PW)
+        with patch('src.utils.utils.run_cmd') as mock_run:
+            show_containers_with_stats(MagicMock(), self.show_loading)
+        mock_run.assert_not_called()
+        mock_async.assert_called_once()
 
     @patch('src.stats.tables.check_docker_running', return_value=True)
     @patch('src.stats.tables.get_sudo_password', return_value=FAKE_PW)
-    @patch('src.stats.tables.run_cmd', return_value='abc123')  # running found → triggers async
     @patch('src.stats.tables.async_run')
     def test_container_stats_uses_correct_async_command(self, mock_async, *_):
         from src.stats.tables import show_containers_with_stats
@@ -881,15 +882,17 @@ class TestDeleteUsedVolumes(_Base):
     def test_delete_used_volumes_queries_correct_commands(self, *_):
         from src.volumes.actions import delete_used_volumes
 
-        # Return values in call order: LS_IDS → LS_DANGLING → rm (deletion)
+        # Return values in call order: LS_IDS → LS_DANGLING → containers using vol1 →
+        # rm -f of those containers → volume rm (a used volume cannot be removed before its containers)
         with patch('src.volumes.actions.run_cmd',
-                   side_effect=['vol1\nvol2', 'vol2', '']) as mock_run:
+                   side_effect=['vol1\nvol2', 'vol2', 'c1', 'c1', 'vol1']) as mock_run:
             delete_used_volumes(self.show_output, parent=self.root,
                                 show_loading_callback=self.show_loading)
 
         issued = [c[0][0] for c in mock_run.call_args_list]
-        self.assertIn(DOCKER_VOLUME_LS_IDS, issued)
-        self.assertIn(DOCKER_VOLUME_LS_DANGLING, issued)
+        self.assertEqual(issued, [DOCKER_VOLUME_LS_IDS, DOCKER_VOLUME_LS_DANGLING,
+                                  "docker ps -aq --filter volume=vol1", "docker rm -f c1",
+                                  "docker volume rm vol1"])
 
     @patch('src.volumes.actions.check_docker_running', return_value=True)
     @patch('src.ui.ui_components.confirm_action_dialog', return_value=False)
@@ -1078,6 +1081,7 @@ class TestSelectedItemActions(_Base):
         btns['delete_image'].invoke()
         mock_run.assert_not_called()
 
+    @patch('src.config.config_manager.get_sudo_password', return_value=None)
     @patch('tkinter.filedialog.asksaveasfilename', return_value='/tmp/nginx_latest.tar')
     @patch('src.shared.item_actions.run_docker_cmd')
     def test_save_image(self, mock_run, *_):
@@ -1091,6 +1095,17 @@ class TestSelectedItemActions(_Base):
             DOCKER_IMAGE_SAVE.format(output_file='/tmp/nginx_latest.tar', image='nginx:latest'),
             cmd,
         )
+
+    @patch('src.config.config_manager.get_sudo_password', return_value=FAKE_PW)
+    @patch('tkinter.filedialog.asksaveasfilename', return_value='/tmp/nginx_latest.tar')
+    @patch('src.shared.item_actions.run_docker_cmd')
+    def test_save_image_through_sudo_is_handed_back_to_the_user(self, mock_run, *_):
+        import os
+        btns = self._build(self._dm('image', _F_IMAGE))
+        btns['save_image'].invoke()
+        cmd = mock_run.call_args[0][0]
+        if os.geteuid() != 0:
+            self.assertTrue(cmd.endswith(f"&& chown -R {os.getuid()}:{os.getgid()} /tmp/nginx_latest.tar"))
 
     # --- Volume action buttons ---
 
@@ -1850,6 +1865,29 @@ class TestRoundedHelpers(_Base):
         badge.set_text("38 of 38 containers")
         self.root.update_idletasks()
         self.assertGreater(badge.winfo_reqwidth(), narrow)
+
+    def test_a_theme_looks_the_same_every_time_it_is_selected(self):
+        # apply_rounded_styles overwrites the theme's button colours in place; reading them back on
+        # the next visit made each switch back to a theme draw it differently
+        from tkinter import ttk
+        from src.ui import rounded
+        style = ttk.Style(self.root)
+        looks = {}
+        for theme in ("clam", "alt", "clam", "alt", "clam"):
+            style.theme_use(theme)
+            rounded.apply_rounded_styles(style, self.root)
+            look = ({k: dict(v) for k, v in rounded.BUTTON_PALETTE.items()},
+                    {t: str(style.lookup(f"{t}.TLabel", "foreground")) for t in rounded.TONES})
+            self.assertEqual(looks.setdefault(theme, look), look, theme)
+
+    def test_dialog_tables_stripe_rows_in_theme_colours(self):
+        from tkinter import ttk
+        from src.ui import rounded
+        tree = ttk.Treeview(self.root)
+        rounded.stripe_rows(tree)
+        palette = rounded.surface_palette()
+        self.assertEqual(str(tree.tag_configure("evenrow", "background")), palette["surface"])
+        self.assertEqual(str(tree.tag_configure("oddrow", "background")), palette["stripe"])
 
     def test_make_remembers_colours_for_theme_changes(self):
         from src.ui import rounded

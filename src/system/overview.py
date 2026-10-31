@@ -47,6 +47,8 @@ def gather_overview():
         info["context"] = run(DOCKER_CONTEXT_SHOW)
         info["host"] = run(DOCKER_CONTEXT_HOST)
         parts = (run(DOCKER_INFO_SUMMARY) or "").split("\t")
+        if len(parts) == 4:     # an empty last field (OperatingSystem) loses its tab to strip()
+            parts.append("")
         if len(parts) == 5:
             info["server_version"], info["containers"], info["running"], info["images"], info["os"] = parts
     return info

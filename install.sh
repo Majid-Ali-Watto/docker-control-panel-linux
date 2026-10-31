@@ -157,6 +157,8 @@ fi
 
 # Package names differ per distro family.
 PKG_PY_VERSIONED=""     # fallback sets for a system Python that is too old: "version|packages"
+# Generic names for an unknown package manager (set -u): they only mark what is missing.
+PKG_PY="python3"; PKG_TK="tkinter"; PKG_DOCKER="docker"; PKG_SECRET="secret-tool"
 case "$PM" in
     apt)    PKG_PY="python3 python3-venv python3-pip"; PKG_TK="python3-tk"
             PKG_DOCKER="docker.io"; PKG_SECRET="libsecret-tools"

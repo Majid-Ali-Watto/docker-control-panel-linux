@@ -27,6 +27,13 @@ _element_ids = itertools.count()
 _panels = []
 BUTTON_PALETTE = {}             # style name -> {state: (fill, text)} as actually drawn (for audits)
 _tk_colors = []                 # (widget, {"bg"/"fg": colour}) for widgets built by make()
+_theme_colors = {}              # (theme, style name) -> the theme's own colours, read before they are restyled
+
+# Semantic text colours: "<Tone>.TLabel" styles in the theme's own accent, legible on its surface.
+# Use them (or tone_color) instead of colour names such as "green", so text follows the theme.
+TONES = {"Success": "success", "Danger": "danger", "Warning": "warning", "Info": "info", "Accent": "primary"}
+_TONE_FALLBACK = {"success": "#2e9e5b", "danger": "#dc3545", "warning": "#d98200",
+                  "info": "#17a2b8", "primary": "#0066cc"}
 
 
 def _rgb(color):
@@ -93,6 +100,51 @@ def on_fill(fill, preferred, need=4.5):
 def surface_color():
     """Colour of ordinary (ttk) frames in the current theme."""
     return str(ttk.Style().lookup("TFrame", "background") or "#ffffff")
+
+
+def theme_colors():
+    """The ttkbootstrap palette of the current theme (``Style.colors``), or None under plain ttk."""
+    try:
+        from ttkbootstrap import Style
+    except ImportError:
+        return None
+    colors = getattr(Style.instance, "colors", None)
+    return colors if isinstance(getattr(colors, "bg", None), str) else None   # not a stub
+
+
+def tone_color(tone, need=4.5):
+    """Theme accent `tone` ("success", "danger", "warning", "info", "primary") legible on the surface."""
+    colors = theme_colors()
+    color = (colors.get(tone) if colors else None) or _TONE_FALLBACK[tone]
+    return readable(color, surface_color(), need)
+
+
+def surface_palette():
+    """Colours for plain tk surfaces, derived from the theme so they match the ttk widgets around
+    them: surface, text, field / field_text (text areas), line (separators, table grid), stripe
+    (alternate table rows) and accent (selection markers, 3:1 like other non-text UI)."""
+    colors = theme_colors()
+    surface = surface_color()
+    text = (colors.fg if colors else None) or str(ttk.Style().lookup("TLabel", "foreground") or "#000000")
+    return {
+        "surface": surface,
+        "text": text,
+        "field": (colors.inputbg if colors else None) or surface,
+        "field_text": (colors.inputfg if colors else None) or text,
+        "line": _blend(surface, text, 0.14),
+        "stripe": _blend(surface, text, 0.05),
+        "accent": readable((colors.primary if colors else None) or _TONE_FALLBACK["primary"], surface, 3),
+    }
+
+
+def stripe_rows(tree):
+    """Alternating row colours (the 'evenrow' / 'oddrow' tags) for a Treeview, kept in step with the theme."""
+    def paint(_event=None):
+        palette = surface_palette()
+        tree.tag_configure("evenrow", background=palette["surface"])
+        tree.tag_configure("oddrow", background=palette["stripe"])
+    paint()
+    tree.bind("<<ThemeChanged>>", paint, add="+")
 
 
 def readable_color(color, need=4.5):
@@ -183,6 +235,20 @@ def _lookup(style, name, option, state=None):
     return str(value) if value not in (None, "") else None
 
 
+def _theme_original(style, name, options, states):
+    """{state: {option: colour}} of `name` as the theme defines it.
+
+    Read only the first time a theme is rounded: ttk keeps style settings per theme and
+    ttkbootstrap does not rebuild a theme's styles when it is selected again, so a second read
+    would return the colours written below (background = surface …) and every switch back to a
+    theme would draw it differently."""
+    key = (style.theme_use(), name)
+    if key not in _theme_colors:
+        _theme_colors[key] = {st: {opt: _lookup(style, name, opt, list(st) or None) for opt in options}
+                              for st in states}
+    return _theme_colors[key]
+
+
 def _paint_behind(style, name, surface):
     """ttk paints the widget window with the style's `background`; it must equal the parent's
     colour in every state or the transparent corners would show a coloured square."""
@@ -197,17 +263,16 @@ def _round_buttons(style, root, surface):
     for probe in probes:
         probe.destroy()
     for name in names:
-        def look(option, state):
-            return _lookup(style, name, option, state)
-        base_fill = look("background", None)
-        base_edge = look("bordercolor", None) or base_fill
+        theme = _theme_original(style, name, ("background", "bordercolor", "foreground"),
+                                ((), ("disabled",), ("pressed",), ("hover",), ("active",)))
+        base_fill = theme[()]["background"]
+        base_edge = theme[()]["bordercolor"] or base_fill
         outline = base_edge != base_fill          # outline buttons: coloured ring, plain fill
         fills, texts, edges = {}, {}, {}
-        for st in ((), ("disabled",), ("pressed",), ("hover",), ("active",)):
-            state = list(st) or None
-            fill = look("background", state)
-            edge = look("bordercolor", state) or fill
-            text = look("foreground", state)
+        for st, colors in theme.items():
+            fill = colors["background"]
+            edge = colors["bordercolor"] or fill
+            text = colors["foreground"]
             need = 3 if st == ("disabled",) else 4.5
             if outline and not st:
                 # accent-coloured text/ring on the theme surface: darken or lighten the accent
@@ -232,14 +297,12 @@ def _round_fields(style, root, surface):
     for name, element, widget in (("TEntry", "Entry.field", ttk.Entry),
                                   ("TCombobox", "combo.Spinbox.field", ttk.Combobox)):
         widget(root).destroy()
-        states = []
-        for st in ((), ("disabled",), ("readonly",), ("invalid",), ("focus",), ("hover",)):
-            fill = _lookup(style, name, "fieldbackground", list(st) or None)
-            edge = _lookup(style, name, "bordercolor", list(st) or None)
-            states.append((st, fill, edge))
+        theme = _theme_original(style, name, ("fieldbackground", "bordercolor", "foreground"),
+                                ((), ("disabled",), ("readonly",), ("invalid",), ("focus",), ("hover",)))
+        states = [(st, c["fieldbackground"], c["bordercolor"]) for st, c in theme.items()]
         _install(style, root, name, element, states, padding=2)
-        base_fill = _lookup(style, name, "fieldbackground")
-        dim = _lookup(style, name, "foreground", ["disabled"])
+        base_fill = theme[()]["fieldbackground"]
+        dim = theme[("disabled",)]["foreground"]
         if dim and base_fill:
             style.map(name, foreground=[("disabled", readable(dim, base_fill, 3))])
         # the dropdown arrow is bottom-aligned by default; centre it vertically
@@ -273,10 +336,17 @@ def _muted_label(style, surface):
         style.configure("Muted.TLabel", foreground=readable(_blend(text, surface, 0.35), surface))
 
 
+def _tone_labels(style):
+    """"Success.TLabel", "Danger.TLabel" … in this theme's accents (see TONES)."""
+    for prefix, tone in TONES.items():
+        style.configure(f"{prefix}.TLabel", foreground=tone_color(tone))
+
+
 def apply_rounded_styles(style, root):
     """Round the ttk widgets of the current theme. Call again after every theme change."""
     surface = _lookup(style, "TFrame", "background") or "#222222"
     _muted_label(style, surface)
+    _tone_labels(style)
     _round_buttons(style, root, surface)
     _round_fields(style, root, surface)
     _round_frames(style, root)

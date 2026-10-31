@@ -60,7 +60,8 @@ class ScrollFrame(ttk.Frame):
     def _unbind_wheel(self, _event):
         # moving onto a child still counts as "inside"
         x, y = self.winfo_pointerxy()
-        if self.winfo_containing(x, y) is not None and str(self.winfo_containing(x, y)).startswith(str(self)):
+        inside = str(self.winfo_containing(x, y) or "")
+        if inside == str(self) or inside.startswith(str(self) + "."):
             return
         for sequence in ("<MouseWheel>", "<Button-4>", "<Button-5>"):
             self.unbind_all(sequence)

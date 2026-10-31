@@ -10,7 +10,6 @@ from tkinter import ttk, messagebox
 from src.config.config_manager import get_setting, set_setting, password_storage
 from src.shared.helpers import _center_dialog
 from src.stats.tables import _INTERVALS
-from src.ui.rounded import readable_color
 from src.utils.utils import installed_terminals, docker_needs_sudo
 
 _ENGINES = ("docker", "podman")
@@ -37,7 +36,7 @@ def settings_dialog(root):
         ttk.Label(form, text=label, font=("Arial", 10)).grid(row=index * 2, column=0, sticky="w", pady=(8, 0))
         widget.grid(row=index * 2, column=1, sticky="ew", padx=(12, 0), pady=(8, 0))
         if hint:
-            ttk.Label(form, text=hint, font=("Arial", 8), foreground=readable_color("gray"), wraplength=330,
+            ttk.Label(form, text=hint, font=("Arial", 8), style="Muted.TLabel", wraplength=330,
                       justify=tk.LEFT).grid(row=index * 2 + 1, column=1, sticky="w", padx=(12, 0))
 
     row(0, "Live Stats refresh:",
@@ -62,10 +61,10 @@ def settings_dialog(root):
     storage.pack(padx=20, pady=(10, 0), fill=tk.X)
     where = "the desktop keyring" if password_storage() == "keyring" else "~/.docker-gui/config.json (mode 0600)"
     ttk.Label(storage, text=f"Saved sudo password is kept in {where}.", font=("Arial", 8),
-              foreground=readable_color("gray"), wraplength=400, justify=tk.LEFT).pack(anchor="w")
+              style="Muted.TLabel", wraplength=400, justify=tk.LEFT).pack(anchor="w")
     if not docker_needs_sudo():
         ttk.Label(storage, text="Your user can run Docker directly, so no sudo password is needed for it.",
-                  font=("Arial", 8), foreground=readable_color("gray"), wraplength=400,
+                  font=("Arial", 8), style="Muted.TLabel", wraplength=400,
                   justify=tk.LEFT).pack(anchor="w")
 
     def on_save():

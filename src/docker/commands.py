@@ -33,6 +33,7 @@ DOCKER_PS_STOPPED = "docker ps -a --filter 'status=exited' --format '{{.ID}}\t{{
 DOCKER_PS_PAUSED = "docker ps -a --filter 'status=paused' --format '{{.ID}}\t{{.Names}}\t{{.Image}}\t{{.Status}}\t{{.Ports}}\t{{.Size}}\t{{.CreatedAt}}'"
 DOCKER_PS_IDS_ALL = "docker ps -aq"
 DOCKER_PS_IDS_RUNNING = "docker ps -q"
+DOCKER_PS_IDS_BY_VOLUME = "docker ps -aq --filter volume={volume}"
 DOCKER_PS_NAMES_ALL = "docker ps -a --format '{{.Names}}'"
 
 # Container stats
@@ -41,7 +42,7 @@ DOCKER_STATS_NO_STREAM = "docker stats --no-stream --format '{{.ID}}\t{{.Name}}\
 # Container actions
 DOCKER_START_ALL = "docker start $(docker ps -aq)"
 DOCKER_STOP_ALL = "docker stop $(docker ps -aq)"
-DOCKER_RESTART_ALL = "docker restart $(docker ps -aq)"
+DOCKER_RESTART_ALL = "docker restart $(docker ps -q)"
 DOCKER_RM_ALL = "docker rm -f $(docker ps -aq)"
 DOCKER_STOP_ALL_SAFE = "docker stop $(docker ps -aq) 2>/dev/null || true"
 DOCKER_RM_ALL_SAFE = "docker rm -f $(docker ps -aq) 2>/dev/null || true"
@@ -83,7 +84,7 @@ DOCKER_IMAGE_INSPECT = "docker image inspect {image}"
 # Volume commands
 DOCKER_VOLUME_LS_IDS = "docker volume ls -q"
 DOCKER_VOLUME_LS_DANGLING = "docker volume ls -qf dangling=true"
-DOCKER_VOLUME_PRUNE = "docker volume prune -f"
+DOCKER_VOLUME_PRUNE = "docker volume prune -a -f"
 DOCKER_VOLUME_RM_ALL = "docker volume rm $(docker volume ls -q)"
 DOCKER_VOLUME_RM_ALL_SAFE = "docker volume rm $(docker volume ls -q) 2>/dev/null || true"
 DOCKER_VOLUME_CREATE = "docker volume create {name}"

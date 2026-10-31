@@ -177,7 +177,7 @@ class TestTerminals(_Host):
 
     def test_an_emulator_that_exits_at_once_is_skipped(self):
         self.host(tools=("xterm", "konsole"))
-        dead = MagicMock(wait=MagicMock(return_value=1), stderr=MagicMock(read=lambda: b"no display"))
+        dead = MagicMock(wait=MagicMock(return_value=1))
         alive = MagicMock(wait=MagicMock(side_effect=subprocess.TimeoutExpired("x", 1)))
         with patch.object(terminals.subprocess, "Popen", side_effect=[dead, alive]) as popen:
             ok, _ = terminals.launch("/tmp/s.sh", "T")        # konsole dies at once, xterm takes over
@@ -186,8 +186,12 @@ class TestTerminals(_Host):
 
     def test_reports_the_last_error_when_nothing_opens(self):
         self.host(tools=("xterm",))
-        dead = MagicMock(wait=MagicMock(return_value=2), stderr=MagicMock(read=lambda: b"cannot open display"))
-        with patch.object(terminals.subprocess, "Popen", return_value=dead):
+        dead = MagicMock(wait=MagicMock(return_value=2))
+
+        def popen(argv, stderr, **_):   # the emulator writes its complaint to the stderr file
+            stderr.write(b"cannot open display")
+            return dead
+        with patch.object(terminals.subprocess, "Popen", side_effect=popen):
             ok, error = terminals.launch("/tmp/s.sh", "T")
         self.assertFalse(ok)
         self.assertIn("cannot open display", error)

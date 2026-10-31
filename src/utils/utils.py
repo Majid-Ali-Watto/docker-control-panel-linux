@@ -5,6 +5,7 @@ Common utility functions for Docker operations and checks.
 
 import os
 import re
+import shlex
 import shutil
 import subprocess
 import threading
@@ -101,7 +102,20 @@ def docker_needs_sudo():
                                 capture_output=True, text=True, timeout=15)
     except (OSError, subprocess.SubprocessError):
         return True
-    return result.returncode != 0 or not result.stdout.strip()
+    if result.returncode == 0 and result.stdout.strip():
+        return False
+    # No answer. A stopped daemon must not mean "ask for sudo": membership of the `docker` group
+    # (which grants the socket) decides then; a refused socket always needs sudo.
+    refused = "permission denied" in str(result.stderr or "").lower()
+    return refused or engine() != "docker" or not _in_docker_group()
+
+
+def _in_docker_group():
+    import grp
+    try:
+        return any(grp.getgrgid(gid).gr_name == "docker" for gid in os.getgroups())
+    except (KeyError, OSError):
+        return False
 
 
 def notify(title, message, root=None):
@@ -123,74 +137,79 @@ def notify(title, message, root=None):
     return True
 
 
+class CmdOutput(str):
+    """Command output (a str) that also carries the command's exit status in `returncode`."""
+    returncode = None
+
+
+def _output(result, strip_sudo=False):
+    """What a command printed: stdout when it succeeded (its stderr only when stdout is empty, e.g.
+    `compose up` progress), so docker's WARNING lines never land in parsed output; both when it
+    failed, so the reason is never lost."""
+    stderr = result.stderr or ''
+    if strip_sudo:
+        stderr = '\n'.join(line for line in stderr.splitlines() if not _SUDO_NOISE.match(line.strip()))
+    stdout, stderr = (result.stdout or '').strip(), stderr.strip()
+    if result.returncode == 0:
+        text = stdout or stderr
+    else:
+        text = '\n'.join(part for part in (stdout, stderr) if part)
+    out = CmdOutput(text)
+    out.returncode = result.returncode
+    return out
+
+
+# sudo's own lines (wrong password retries); its prompt is silenced with -p ''
+_SUDO_NOISE = re.compile(r'^\[sudo\]|^Password:|^Sorry, try again', re.IGNORECASE)
+
+
+def sudo_command(cmd):
+    """`cmd` run by a root shell, so `$(...)`, pipes and redirects inside it run as root too (a
+    bare `sudo -S docker stop $(docker ps -q)` expands the `$(...)` as the user, who may not reach
+    the docker socket). -k makes sudo always read the password line from stdin (with cached
+    credentials it would pass that line on to the command); -p '' keeps its prompt out of the output."""
+    return f"sudo -S -k -p '' sh -c {shlex.quote(cmd)}"
+
+
 def run_cmd(cmd, sudo=False, sudo_password=None, input_text=None):
-    """Run a shell command and return output. `input_text` is fed to the command's stdin (after
-    the sudo password, which sudo reads first) — used to pass secrets without putting them in argv."""
+    """Run a shell command and return its output (see _output) as a CmdOutput, whose `returncode`
+    is the exit status. `input_text` is fed to the command's stdin (after the sudo password, which
+    sudo reads first) — used to pass secrets without putting them in argv."""
     cmd = apply_engine(cmd)
     if sudo and sudo_password:
-        # Use sudo with -S flag to read password from stdin
-        process = subprocess.Popen(
-            f"sudo -S {cmd}",
-            shell=True,
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True
-        )
-        stdout, stderr = process.communicate(input=f"{sudo_password}\n{input_text or ''}")
-        clean_stderr = '\n'.join(
-            line for line in stderr.splitlines()
-            if not re.match(r'^\[sudo\]|^Password:|^Sorry,', line.strip(), re.IGNORECASE)
-        ).strip()
-        result = stdout if stdout.strip() or not clean_stderr else clean_stderr
-        return result.strip()
-    elif input_text is not None:
-        result = subprocess.run(cmd, shell=True, input=input_text, stdout=subprocess.PIPE,
-                                stderr=subprocess.STDOUT, text=True)
-        return result.stdout.strip()
-    else:
-        try:
-            result = subprocess.check_output(
-                cmd,
-                shell=True,
-                stderr=subprocess.STDOUT,
-                text=True
-            )
-            return result.strip()
-        except subprocess.CalledProcessError as e:
-            return e.output.strip()
+        result = subprocess.run(sudo_command(cmd), shell=True, input=f"{sudo_password}\n{input_text or ''}",
+                                capture_output=True, text=True)
+        return _output(result, strip_sudo=True)
+    result = subprocess.run(cmd, shell=True, input=input_text, capture_output=True, text=True)
+    return _output(result)
 
 
-def async_run(cmd, callback=None, sudo=False, sudo_password=None, loading_callback=None):
-    """Run a command asynchronously in a thread with cancellation support"""
-    # Cancel any previous operation
-    cancel_current_operation()
-    
-    # Create new cancellation event
+def async_run(cmd, callback=None, sudo=False, sudo_password=None, loading_callback=None, cancellable=True):
+    """Run a command in a thread. A cancellable run (loading a view) is dropped when a newer one
+    starts or the view changes, so a stale list never replaces the current one. Commands that
+    change state pass cancellable=False: their result (status, list reload) must always arrive."""
     cancel_event = threading.Event()
-    _current_operation['event'] = cancel_event
-    
+    if cancellable:
+        cancel_current_operation()
+        _current_operation['event'] = cancel_event
+
     def task():
         if loading_callback:
             loading_callback(True)
-        
-        # Check if cancelled before running
-        if not cancel_event.is_set():
-            result = run_cmd(cmd, sudo, sudo_password)
-            
-            # Check if cancelled after running
-            if not cancel_event.is_set() and callback:
-                callback(result)
-        
-        if loading_callback:
-            loading_callback(False)
-        
-        # Clear the operation if it's still this one
-        if _current_operation['event'] is cancel_event:
-            _current_operation['event'] = None
-    
+        try:
+            if not cancel_event.is_set():
+                result = run_cmd(cmd, sudo, sudo_password)
+                if not cancel_event.is_set() and callback:
+                    callback(result)
+        finally:
+            # a cancelled run leaves the spinner to the run that replaced it, if there is one
+            replaced = _current_operation['event'] not in (None, cancel_event)
+            if loading_callback and not (cancel_event.is_set() and replaced):
+                loading_callback(False)
+            if _current_operation['event'] is cancel_event:
+                _current_operation['event'] = None
+
     startThreadForTask(task)
-    
 
 
 def sync_run(cmd, sudo=False, sudo_password=None, loading_callback=None):

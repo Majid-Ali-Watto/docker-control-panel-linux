@@ -3,6 +3,8 @@ Terminal Panel — embedded general-purpose shell inside the Docker Control Pane
 """
 
 import os
+import shlex
+import signal
 import subprocess
 import threading
 import tkinter as tk
@@ -194,6 +196,7 @@ class TerminalPanel(tk.Frame):
                     cwd=self._cwd,
                     text=True,
                     bufsize=1,
+                    start_new_session=True,   # own process group, so Kill reaches its children too
                 )
                 with self._proc_lock:
                     self._running_proc = proc
@@ -234,21 +237,32 @@ class TerminalPanel(tk.Frame):
         self._entry.focus()
 
     def _kill(self):
+        """Stop the running command and everything it started (the shell's children keep the
+        output pipes open otherwise). Run is re-enabled when the command has really ended."""
         with self._proc_lock:
             proc = self._running_proc
-        if proc:
-            try:
-                proc.terminate()
-            except Exception:
-                pass
-            self._append("err", "\n[Process terminated]\n")
-        self._on_done(-1)
+        if not proc:
+            return
+        self._signal_group(proc, signal.SIGTERM)
+        self._btn_kill.config(state=tk.DISABLED)
+        self._append("err", "\n[Process terminated]\n")
+        self.after(2000, lambda: proc.poll() is None and self._signal_group(proc, signal.SIGKILL))
+
+    @staticmethod
+    def _signal_group(proc, sig):
+        try:
+            os.killpg(proc.pid, sig)
+        except (ProcessLookupError, PermissionError):
+            pass
 
     # ── Built-in: cd ─────────────────────────────────────────────────────────
 
     def _handle_cd(self, cmd: str):
-        parts = cmd.split(None, 1)
-        target = parts[1].strip() if len(parts) > 1 else os.path.expanduser("~")
+        try:
+            parts = shlex.split(cmd)   # cd "My Dir" / cd My\ Dir
+        except ValueError:
+            parts = cmd.split(None, 1)
+        target = parts[1] if len(parts) > 1 else os.path.expanduser("~")
         target = os.path.expanduser(target)
         if not os.path.isabs(target):
             target = os.path.join(self._cwd, target)

@@ -52,8 +52,8 @@ CATEGORY_TOOLTIPS = {
         "Used": "Show only volumes currently attached to one or more containers",
         "Unused": "Show only volumes not attached to any container",
         "Create": "Create a new named Docker volume",
-        "Prune (Unused)": "Remove all dangling (unused) volumes to free disk space",
-        "Delete Used": "Remove volumes currently attached to containers",
+        "Prune (Unused)": "Remove every volume no container uses (named and anonymous) to free disk space",
+        "Delete Used": "Remove volumes attached to containers,\nremoving those containers first",
         "Delete All": "Remove ALL volumes - used and unused",
     },
     "Networks": {

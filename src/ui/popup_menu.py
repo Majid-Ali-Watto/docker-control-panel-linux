@@ -128,7 +128,8 @@ class PopupMenu:
     def _on_press(self, event):
         if self._opened_by is not None and event.serial == self._opened_by:
             return
-        if self.is_open and not str(event.widget).startswith(str(self._holder)):
+        widget, holder = str(event.widget), str(self._holder)
+        if self.is_open and widget != holder and not widget.startswith(holder + "."):
             self.close()
 
     def _on_escape(self, _event):

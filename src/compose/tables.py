@@ -2,7 +2,6 @@
 Compose project table views.
 """
 
-import json
 import os
 import re
 
@@ -10,6 +9,7 @@ from src.docker.actions import check_docker_running
 from src.config.config_manager import get_sudo_password, load_compose_projects
 from src.utils.utils import async_run
 from src.docker.commands import DOCKER_COMPOSE_LS
+from src.shared.helpers import parse_json_records
 
 
 def _saved_project_rows(listed_files):
@@ -33,16 +33,12 @@ def show_compose_projects(show_table_callback, show_loading_callback):
 
     def callback(result):
         rows = []
-        try:
-            data = json.loads(result.strip() or "[]")
-            for item in data:
-                rows.append([
-                    item.get("Name", ""),
-                    item.get("Status", ""),
-                    item.get("ConfigFiles", ""),
-                ])
-        except (json.JSONDecodeError, TypeError):
-            pass
+        for item in parse_json_records(result):
+            rows.append([
+                item.get("Name", ""),
+                item.get("Status", ""),
+                item.get("ConfigFiles", ""),
+            ])
         listed = {frozenset(f.strip() for f in row[2].split(",")) for row in rows}
         rows += _saved_project_rows(listed)
 
