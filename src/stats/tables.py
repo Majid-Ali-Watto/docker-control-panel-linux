@@ -9,11 +9,11 @@ from tkinter import ttk
 
 from src.docker.actions import check_docker_running
 from src.config.config_manager import get_sudo_password, get_setting, set_setting
-from src.utils.utils import async_run, run_cmd
+from src.shared.helpers import is_error_output
+from src.utils.utils import async_run
 from src.docker.commands import (
     DOCKER_STATS_NO_STREAM,
     DOCKER_DISK_STORAGE_SIMPLE,
-    DOCKER_PS_IDS_RUNNING,
 )
 
 
@@ -107,43 +107,42 @@ def show_containers_with_stats(show_table_callback, show_loading_callback, displ
 
         live_btn.config(text="⏹ Stop Live Stats" if display_manager.live_stats_enabled else "▶ Live Stats")
 
-    running = run_cmd(DOCKER_PS_IDS_RUNNING, sudo=True, sudo_password=get_sudo_password()).strip()
-    if not running:
-        show_table_callback(
-            _COLUMNS, [], 'container_stats', "Container Stats (Running Containers Only)", False
+    _fetch_stats(show_table_callback, show_loading_callback, display_manager,
+                 on_stopped=lambda: live_btn.config(text="▶ Live Stats") if display_manager else None)
+
+
+def _fetch_stats(show_table_callback, show_loading_callback, display_manager, on_stopped):
+    """One refresh, run off the Tk thread (`docker stats … $(docker ps -q)` lists nothing when
+    nothing runs). With Live Stats on, the next refresh is scheduled from here without the
+    daemon check of a manual refresh; if the daemon goes away the loop stops (`on_stopped`)."""
+    def schedule_next():
+        if not (display_manager and display_manager.live_stats_enabled):
+            return
+        if display_manager.live_stats_job:
+            try:
+                display_manager.output_container.after_cancel(display_manager.live_stats_job)
+            except Exception:
+                pass
+        display_manager.live_stats_job = display_manager.output_container.after(
+            _interval_ms(),
+            lambda: _fetch_stats(show_table_callback, show_loading_callback, display_manager, on_stopped)
         )
-        if display_manager and display_manager.live_stats_enabled:
-            display_manager.live_stats_job = display_manager.output_container.after(
-                _interval_ms(),
-                lambda: show_containers_with_stats(show_table_callback, show_loading_callback, display_manager)
-            )
-        return
 
     def callback(result):
-        rows = []
-        for line in result.split('\n'):
-            if line.strip():
-                parts = line.split('\t')
-                if len(parts) >= 7:
-                    rows.append(parts)
-
-        if not rows:
-            rows = []
-
+        rows = [parts for parts in (line.split('\t') for line in result.split('\n') if line.strip())
+                if len(parts) >= 7]
         show_table_callback(
             _COLUMNS, _with_trends(rows), 'container_stats', "Container Stats (Running Containers Only)", False
         )
-
-        if display_manager and display_manager.live_stats_enabled:
-            if display_manager.live_stats_job:
-                try:
-                    display_manager.output_container.after_cancel(display_manager.live_stats_job)
-                except Exception:
-                    pass
-            display_manager.live_stats_job = display_manager.output_container.after(
-                _interval_ms(),
-                lambda: show_containers_with_stats(show_table_callback, show_loading_callback, display_manager)
-            )
+        if display_manager is None:
+            return
+        if is_error_output(result) and display_manager.live_stats_enabled:
+            reason = (result.splitlines() or ["Docker did not answer"])[0][:120]
+            display_manager.output_container.after(0, lambda: (
+                display_manager.stop_live_stats(), on_stopped(),
+                display_manager.set_status(f"✖ Live Stats stopped: {reason}", "error")))
+            return
+        display_manager.output_container.after(0, schedule_next)
 
     async_run(
         DOCKER_STATS_NO_STREAM,

@@ -161,7 +161,8 @@ class TestEngine(unittest.TestCase):
     def test_run_cmd_runs_the_configured_engine(self):
         from src.utils.utils import run_cmd
         with patch("src.utils.utils.get_setting", return_value="podman"), \
-                patch("src.utils.utils.subprocess.check_output", return_value="ok\n") as out:
+                patch("src.utils.utils.subprocess.run",
+                      return_value=MagicMock(stdout="ok\n", stderr="", returncode=0)) as out:
             run_cmd("docker ps")
         self.assertEqual(out.call_args[0][0], "podman ps")
 
@@ -174,14 +175,25 @@ class TestRunCmdInput(unittest.TestCase):
 
     def test_input_follows_the_sudo_password(self):
         from src.utils.utils import run_cmd
-        process = MagicMock()
-        process.communicate.return_value = ("Login Succeeded\n", "")
-        with patch("src.utils.utils.subprocess.Popen", return_value=process) as popen:
+        done = MagicMock(stdout="Login Succeeded\n", stderr="", returncode=0)
+        with patch("src.utils.utils.subprocess.run", return_value=done) as run:
             result = run_cmd("docker login -u me --password-stdin", sudo=True,
                              sudo_password=FAKE_PW, input_text="token\n")
         self.assertEqual(result, "Login Succeeded")
-        self.assertTrue(popen.call_args[0][0].startswith("sudo -S docker login"))
-        self.assertEqual(process.communicate.call_args.kwargs["input"], f"{FAKE_PW}\ntoken\n")
+        self.assertEqual(result.returncode, 0)
+        self.assertEqual(run.call_args[0][0],
+                         "sudo -S -k -p '' sh -c 'docker login -u me --password-stdin'")
+        self.assertEqual(run.call_args.kwargs["input"], f"{FAKE_PW}\ntoken\n")
+
+    def test_substitutions_run_inside_the_root_shell(self):
+        from src.utils.utils import sudo_command
+        self.assertEqual(sudo_command("docker stop $(docker ps -q)"),
+                         "sudo -S -k -p '' sh -c 'docker stop $(docker ps -q)'")
+
+    def test_exit_status_travels_with_the_output(self):
+        from src.utils.utils import run_cmd
+        self.assertEqual(run_cmd("echo error-page").returncode, 0)
+        self.assertEqual(run_cmd("echo oops; exit 3").returncode, 3)
 
 
 class TestSudoDetection(unittest.TestCase):
@@ -193,8 +205,20 @@ class TestSudoDetection(unittest.TestCase):
 
     def test_sudo_needed_on_permission_denied(self):
         from src.utils.utils import docker_needs_sudo
-        with patch("src.utils.utils.subprocess.run", return_value=MagicMock(returncode=1, stdout="")):
+        denied = MagicMock(returncode=1, stdout="", stderr="permission denied while trying to connect")
+        with patch("src.utils.utils.subprocess.run", return_value=denied), \
+                patch("src.utils.utils._in_docker_group", return_value=True):
             self.assertTrue(docker_needs_sudo())
+
+    def test_stopped_daemon_does_not_ask_docker_group_members(self):
+        from src.utils.utils import docker_needs_sudo
+        down = MagicMock(returncode=1, stdout="", stderr="Cannot connect to the Docker daemon")
+        with patch("src.utils.utils.subprocess.run", return_value=down), \
+                patch("src.utils.utils.get_setting", return_value="docker"):
+            with patch("src.utils.utils._in_docker_group", return_value=True):
+                self.assertFalse(docker_needs_sudo())
+            with patch("src.utils.utils._in_docker_group", return_value=False):
+                self.assertTrue(docker_needs_sudo())
 
     def test_sudo_needed_when_the_cli_hangs(self):
         import subprocess
@@ -556,7 +580,7 @@ class TestStatsControls(_Base):
         dm.live_stats_enabled = False
         saved = {"stats_interval": 2}
         with patch.object(tables, "check_docker_running", return_value=True), \
-                patch.object(tables, "run_cmd", return_value=""), \
+                patch.object(tables, "async_run"), \
                 patch.object(tables, "get_setting", side_effect=lambda key: saved[key]), \
                 patch.object(tables, "set_setting", side_effect=lambda key, value: saved.update({key: value})):
             tables.show_containers_with_stats(MagicMock(), MagicMock(), dm)

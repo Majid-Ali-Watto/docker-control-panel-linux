@@ -3,6 +3,7 @@ Docker Actions Module
 High-level Docker service actions and bulk container/image/volume/network operations.
 """
 
+import os
 import time
 
 from src.utils import platform_utils as plat
@@ -43,7 +44,20 @@ def _run_service_action(action):
     return run_cmd(command, sudo=True, sudo_password=get_sudo_password())
 
 
+def _have_root_password(root):
+    """Starting / stopping the daemon needs root even for `docker`-group members, who are never
+    asked for a password at startup: ask now (False when cancelled)."""
+    if get_sudo_password() or os.geteuid() == 0 or plat.service_command("start") is None:
+        return True
+    from src.ui.ui_components import prompt_password_dialog
+    return bool(prompt_password_dialog(root, None))
+
+
 def _service_task(action, title, settle, root, status_var, show_loading_callback, show_text_output_callback):
+    if not _have_root_password(root):
+        show_text_output_callback(f"{title} Docker cancelled: controlling the Docker service needs your sudo password.")
+        return
+
     def task():
         show_loading_callback(True)
         result = _run_service_action(action)
@@ -69,11 +83,21 @@ def restart_docker_service(root, status_var, show_loading_callback, show_text_ou
     _service_task("restart", "Restart", 2, root, status_var, show_loading_callback, show_text_output_callback)
 
 
-def confirm_and_run(msg, cmd, show_text_output_callback, sudo=False, parent=None, show_loading_callback=None):
-    """Confirm action and run command"""
+def bulk_output(show_text_output_callback, nothing_text):
+    """Output callback for `docker <verb> $(docker ... -q)`: when the inner list is empty docker
+    prints a usage error ("requires at least 1 argument"); show `nothing_text` instead."""
+    def callback(result):
+        show_text_output_callback(nothing_text if "requires at least 1 argument" in str(result) else result)
+    return callback
+
+
+def confirm_and_run(msg, cmd, show_text_output_callback, sudo=False, parent=None, show_loading_callback=None,
+                    nothing_text=None):
+    """Confirm action and run command (`nothing_text`: see bulk_output)"""
     from src.ui.ui_components import confirm_action_dialog
     if confirm_action_dialog(parent, "Confirm", msg):
-        async_run(cmd, lambda r: show_text_output_callback(r), sudo, get_sudo_password(),
+        show = bulk_output(show_text_output_callback, nothing_text) if nothing_text else show_text_output_callback
+        async_run(cmd, lambda r: show(r), sudo, get_sudo_password(),
                   loading_callback=show_loading_callback)
 
 

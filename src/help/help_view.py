@@ -107,7 +107,8 @@ class _Card(ttk.Frame):
 class HelpTab(ttk.Frame):
     def __init__(self, parent):
         super().__init__(parent)
-        ttk.Style().configure(_CARD_STYLE, anchor="w", padding=(10, 8))
+        self._style_cards()
+        self.bind("<<ThemeChanged>>", self._style_cards, add="+")     # ttk keeps styles per theme
         bar = ttk.Frame(self)
         bar.pack(fill=tk.X, padx=8, pady=(8, 4))
         ttk.Label(bar, text="🔍").pack(side=tk.LEFT, padx=(2, 4))
@@ -127,6 +128,10 @@ class HelpTab(ttk.Frame):
         self._saved_open = None
         self.query.trace_add("write", lambda *_: self._on_search())
         self.bind("<Map>", self._build_once)    # the cards are only created when the tab is first shown
+
+    @staticmethod
+    def _style_cards(_event=None):
+        ttk.Style().configure(_CARD_STYLE, anchor="w", padding=(10, 8))
 
     def _build_once(self, _event=None):
         if self.cards:

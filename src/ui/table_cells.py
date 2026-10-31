@@ -59,8 +59,9 @@ class CellSelection:
         self.move_to_row(None)
 
     def value(self):
-        """(column name, text) of the active cell, '' for an empty one; None without a cell."""
-        if self.iid is None or self.col is None:
+        """(column name, text) of the active cell, '' for an empty one; None without a cell or when
+        its row is no longer selected (the outline is hidden then, so it must not be copied)."""
+        if self.iid is None or self.col is None or self.iid not in self.tree.selection():
             return None
         values, index = self._row_texts(self.iid), int(self.col[1:]) - 1
         if not 0 <= index < len(values):

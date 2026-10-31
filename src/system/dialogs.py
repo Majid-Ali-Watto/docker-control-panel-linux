@@ -10,7 +10,6 @@ from src.docker.actions import check_docker_running
 from src.docker.commands import DOCKER_EVENTS
 from src.docker.operations import stream_docker_cmd, cancel_stream
 from src.config.config_manager import get_sudo_password
-from src.ui.rounded import readable_color
 
 _TYPES = ["all", "container", "image", "volume", "network", "daemon"]
 _SINCE = {"Live only": "0s", "Last 10 minutes": "10m", "Last hour": "1h", "Last 24 hours": "24h"}
@@ -120,7 +119,7 @@ def events_dialog(root):
             cancel_stream(state["controller"])
         state["controller"] = state["token"] = None
         toggle_btn.config(text="▶ Start")
-        status.config(text="Stopped", foreground=readable_color("gray"))
+        status.config(text="Stopped", style="Muted.TLabel")
 
     def start():
         stop()
@@ -134,7 +133,7 @@ def events_dialog(root):
                 if state["token"] is token and not cancelled:
                     state["controller"] = state["token"] = None
                     toggle_btn.config(text="▶ Start")
-                    status.config(text=f"Event stream ended (exit code {code})", foreground=readable_color("red"))
+                    status.config(text=f"Event stream ended (exit code {code})", style="Danger.TLabel")
             ui(finish)
 
         state["controller"] = stream_docker_cmd(
@@ -142,7 +141,7 @@ def events_dialog(root):
             sudo=True, sudo_password=get_sudo_password(),
             output_callback=on_line, complete_callback=on_done)
         toggle_btn.config(text="⏹ Stop")
-        status.config(text="📡 Listening for events…", foreground=readable_color("blue"))
+        status.config(text="📡 Listening for events…", style="Info.TLabel")
 
     def toggle():
         stop() if state["controller"] else start()
@@ -161,7 +160,7 @@ def events_dialog(root):
             try:
                 with open(filename, "w") as handle:
                     handle.write(text.get("1.0", tk.END))
-                status.config(text=f"✓ Saved to {filename}", foreground=readable_color("green"))
+                status.config(text=f"✓ Saved to {filename}", style="Success.TLabel")
             except OSError as exc:
                 messagebox.showerror("Save Failed", str(exc), parent=window)
 

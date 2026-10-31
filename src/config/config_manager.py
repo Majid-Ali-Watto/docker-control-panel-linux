@@ -31,11 +31,25 @@ def _load_config():
 
 
 def _save_config(config):
-    """Persist the full config dictionary to disk."""
+    """Persist the full config dictionary to disk: written to a 0600 temp file (never readable by
+    others, even briefly — it may hold the password) and renamed over the old one, so an
+    interrupted write can never leave a truncated file that loads as {}."""
     CONFIG_DIR.mkdir(exist_ok=True)
-    with open(CONFIG_FILE, 'w') as f:
-        json.dump(config, f)
-    os.chmod(CONFIG_FILE, 0o600)
+    tmp = f"{CONFIG_FILE}.tmp"
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    try:
+        with os.fdopen(fd, 'w') as f:
+            json.dump(config, f)
+            f.flush()
+            os.fsync(f.fileno())
+        os.chmod(tmp, 0o600)   # in case a stale tmp file existed with other bits
+        os.replace(tmp, CONFIG_FILE)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
 
 
 # The sudo password lives in the desktop keyring (libsecret's `secret-tool`) when one is available;
@@ -77,7 +91,11 @@ def _drop_file_password():
 
 
 def password_storage():
-    """Where a saved password would be kept: 'keyring' or 'file'."""
+    """Where the password is (or would be) kept: 'file' when the config file holds it (also when
+    `secret-tool` exists but storing in the keyring failed, e.g. no keyring daemon), else
+    'keyring' when one is available, else 'file'."""
+    if 'password' in _load_config():
+        return "file"
     return "keyring" if keyring_available() else "file"
 
 

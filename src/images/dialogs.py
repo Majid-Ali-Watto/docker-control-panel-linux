@@ -2,7 +2,7 @@
 Image dialogs: pull, push, registry login, search hub, build, load, import, scan.
 """
 
-from src.ui.rounded import readable_color
+from src.ui.rounded import stripe_rows
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
 import threading
@@ -22,7 +22,7 @@ from src.docker.commands import (
     DOCKER_IMAGE_BUILD, DOCKER_IMAGE_LOAD, DOCKER_IMAGE_IMPORT, DOCKER_SCOUT_CVES,
     DOCKER_LOGIN, DOCKER_LOGOUT,
 )
-from src.shared.helpers import _quote, _split_csv_lines, _center_dialog, _make_output_callback
+from src.shared.helpers import _quote, _split_lines, _center_dialog, _make_output_callback
 from src.shared.stream import _start_stream_session, _show_stream_session_window, _verify_built_image_tag
 
 _LATEST_BUILD_SESSION = None
@@ -73,7 +73,7 @@ def pull_image_dialog(root, refresh_callback):
     image_entry.focus()
 
     ttk.Label(dialog, text="Leave empty for 'latest' tag",
-              font=("Arial", 8), foreground=readable_color("gray")).pack(pady=(0, 4))
+              font=("Arial", 8), style="Muted.TLabel").pack(pady=(0, 4))
 
     btn_frame = ttk.Frame(dialog)
     btn_frame.pack(pady=(8, 20))
@@ -171,7 +171,7 @@ def push_image_dialog(root, image_ref="", refresh_callback=None):
         dialog,
         text="Examples:  username/myimage:1.0   or   myregistry.io/repo:tag\n"
              "Docker Hub only accepts <your username>/<name>; you are asked for it when it is missing.",
-        font=("Arial", 8), foreground=readable_color("gray"), justify=tk.LEFT,
+        font=("Arial", 8), style="Muted.TLabel", justify=tk.LEFT,
     ).pack(padx=20, anchor="w")
 
     status_label = ttk.Label(dialog, text="", font=("Arial", 9))
@@ -203,7 +203,7 @@ def push_image_dialog(root, image_ref="", refresh_callback=None):
                 return
             retag_to = _push_target(image, username.strip().lower())
         btn_push.config(state=tk.DISABLED)
-        status_label.config(text="⏳ Pushing image… (this may take a while)", foreground=readable_color("orange"))
+        status_label.config(text="⏳ Pushing image… (this may take a while)", style="Warning.TLabel")
         dialog.update()
 
         def push_task():
@@ -226,13 +226,13 @@ def push_image_dialog(root, image_ref="", refresh_callback=None):
 
     def on_push_complete(result):
         if _PUSH_OK.search(result):
-            status_label.config(text="✅ Image pushed successfully!", foreground=readable_color("green"))
+            status_label.config(text="✅ Image pushed successfully!", style="Success.TLabel")
             dialog.after(2000, dialog.destroy)
             if refresh_callback:
                 root.after(2100, refresh_callback)
         else:
             btn_push.config(state=tk.NORMAL)
-            status_label.config(text="❌ Push failed", foreground=readable_color("red"))
+            status_label.config(text="❌ Push failed", style="Danger.TLabel")
             reason = push_error_summary(result)
             if "insufficient_scope" in result or "denied" in result.lower():
                 reason += ("\n\nCheck that you are logged in (Images → Registry) and that the image name "
@@ -267,7 +267,7 @@ def search_hub_dialog(root, refresh_callback=None, show_text_output=None):
     btn_search.pack(side=tk.LEFT, padx=(6, 0))
 
     status_label = ttk.Label(dialog, text="Type a term and press Search or Enter",
-                              font=("Arial", 9), foreground=readable_color("gray"))
+                              font=("Arial", 9), style="Muted.TLabel")
     status_label.pack(padx=12, anchor="w", pady=(2, 0))
 
     table_frame = ttk.Frame(dialog)
@@ -275,6 +275,7 @@ def search_hub_dialog(root, refresh_callback=None, show_text_output=None):
 
     columns = ("NAME", "DESCRIPTION", "STARS", "OFFICIAL", "SIZE")
     table = ttk.Treeview(table_frame, columns=columns, show="headings", selectmode="browse")
+    stripe_rows(table)
     for col, w in [("NAME", 180), ("DESCRIPTION", 340), ("STARS", 65), ("OFFICIAL", 75), ("SIZE", 95)]:
         table.heading(col, text=col)
         anchor = "center" if col in ("STARS", "OFFICIAL", "SIZE") else "w"
@@ -292,7 +293,7 @@ def search_hub_dialog(root, refresh_callback=None, show_text_output=None):
                           state=tk.DISABLED)
     btn_pull.pack(side=tk.LEFT)
     ttk.Label(footer, text="Double-click or select + Pull to download",
-              font=("Arial", 8), foreground=readable_color("gray")).pack(side=tk.LEFT, padx=10)
+              font=("Arial", 8), style="Muted.TLabel").pack(side=tk.LEFT, padx=10)
     ttk.Button(footer, text="Close", width=10, command=dialog.destroy).pack(side=tk.RIGHT)
 
     def do_search():
@@ -302,7 +303,7 @@ def search_hub_dialog(root, refresh_callback=None, show_text_output=None):
             return
         btn_search.config(state=tk.DISABLED)
         btn_pull.config(state=tk.DISABLED)
-        status_label.config(text=f"⏳ Searching for '{term}'…", foreground=readable_color("orange"))
+        status_label.config(text=f"⏳ Searching for '{term}'…", style="Warning.TLabel")
         for row in table.get_children():
             table.delete(row)
         dialog.update()
@@ -327,9 +328,9 @@ def search_hub_dialog(root, refresh_callback=None, show_text_output=None):
 
         if not rows:
             if result.strip() and any(w in result.lower() for w in ('error', 'permission', 'denied', 'failed', 'cannot')):
-                status_label.config(text=f"Search error: {result.strip()[:120]}", foreground=readable_color("red"))
+                status_label.config(text=f"Search error: {result.strip()[:120]}", style="Danger.TLabel")
             else:
-                status_label.config(text=f"No results found for '{term}'", foreground=readable_color("gray"))
+                status_label.config(text=f"No results found for '{term}'", style="Muted.TLabel")
             return
 
         item_ids = []
@@ -339,7 +340,7 @@ def search_hub_dialog(root, refresh_callback=None, show_text_output=None):
             item_ids.append(iid)
         status_label.config(
             text=f"Found {len(rows)} result(s) — select one and click Pull to download",
-            foreground=readable_color("green"),
+            style="Success.TLabel",
         )
 
         image_names = [str(table.item(iid)['values'][0]) for iid in item_ids]
@@ -443,7 +444,7 @@ def build_image_dialog(root, show_text_output_callback, refresh_callback=None):
     platform_entry = ttk.Entry(dialog, textvariable=platform_var, width=48)
     platform_entry.grid(row=3, column=1, columnspan=2, sticky="ew", padx=16, pady=6)
     ttk.Label(dialog, text="e.g. linux/amd64 or linux/arm64", font=("Arial", 8),
-              foreground=readable_color("gray")).grid(row=4, column=1, columnspan=2, sticky="w", padx=16)
+              style="Muted.TLabel").grid(row=4, column=1, columnspan=2, sticky="w", padx=16)
 
     ttk.Label(dialog, text="Build args (KEY=VALUE, one per line):", font=("Arial", 10)).grid(row=5, column=0, columnspan=3, sticky="w", padx=16, pady=(8, 4))
     build_args_text = tk.Text(dialog, height=5, width=60, font=("JetBrains Mono", 9))
@@ -464,7 +465,7 @@ def build_image_dialog(root, show_text_output_callback, refresh_callback=None):
             messagebox.showwarning("Tag Required", "Please enter an image tag, for example: myapp:latest", parent=dialog)
             return
         dockerfile_path = dockerfile_var.get().strip()
-        build_args = _split_csv_lines(build_args_text.get("1.0", tk.END))
+        build_args = _split_lines(build_args_text.get("1.0", tk.END))
 
         command = DOCKER_IMAGE_BUILD.format(
             tag=f"-t {_quote(tag)} " if tag else "",
@@ -614,7 +615,7 @@ def registry_dialog(root):
     registry_box = ttk.Combobox(form, textvariable=registry_var, width=38)
     registry_box.grid(row=0, column=1, sticky="ew", padx=(10, 0), pady=4)
     ttk.Label(form, text="Empty = Docker Hub. Others: ghcr.io, registry.example.com:5000",
-              font=("Arial", 8), foreground=readable_color("gray")).grid(row=1, column=1, sticky="w", padx=(10, 0))
+              font=("Arial", 8), style="Muted.TLabel").grid(row=1, column=1, sticky="w", padx=(10, 0))
     ttk.Label(form, text="Username:", font=("Arial", 10)).grid(row=2, column=0, sticky="w", pady=4)
     user_entry = ttk.Entry(form, textvariable=user_var, width=40)
     user_entry.grid(row=2, column=1, sticky="ew", padx=(10, 0), pady=4)
@@ -659,7 +660,7 @@ def registry_dialog(root):
     def run(command, password=None, ok_text=None):
         for button in buttons:
             button.config(state=tk.DISABLED)
-        status_label.config(text="⏳ Working…", foreground=readable_color("orange"))
+        status_label.config(text="⏳ Working…", style="Warning.TLabel")
 
         def task():
             result = run_cmd(command, sudo=True, sudo_password=get_sudo_password(),
@@ -673,7 +674,7 @@ def registry_dialog(root):
                 button.config(state=tk.NORMAL)
             failed = any(word in result.lower() for word in ("error", "denied", "unauthorized", "failed"))
             status_label.config(text=result or ok_text or "Done",
-                                foreground=readable_color("red" if failed else "green"))
+                                style="Danger.TLabel" if failed else "Success.TLabel")
             password_var.set("")
             refit()
             refresh_registries()

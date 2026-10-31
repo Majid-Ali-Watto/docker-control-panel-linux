@@ -2,12 +2,13 @@
 Container dialogs: file browser, terminal, logs.
 """
 
-from src.ui.rounded import readable_color
+from src.ui.rounded import stripe_rows
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
 import threading
 import subprocess
 import os
+import posixpath
 import tempfile
 
 from src.docker.actions import check_docker_running
@@ -17,7 +18,7 @@ from src.docker.operations import stream_docker_cmd, cancel_stream
 from src.utils import terminals
 from src.utils.utils import run_cmd, clean_subprocess_env, check_terminal_installed, engine
 from src.utils.threads import startThreadForTask
-from src.shared.helpers import _quote
+from src.shared.helpers import _quote, owned_by_user
 
 
 def browse_container_files_dialog(root, display_manager):
@@ -62,6 +63,7 @@ def browse_container_files_dialog(root, display_manager):
 
     columns = ("name", "perms", "size", "date", "owner")
     table = ttk.Treeview(table_frame, columns=columns, show="headings", selectmode="browse")
+    stripe_rows(table)
     for col, lbl, w, anchor in [
         ("name",  "Name",        240, "w"),
         ("perms", "Permissions", 110, "w"),
@@ -90,7 +92,7 @@ def browse_container_files_dialog(root, display_manager):
     btn_upload.pack(side=tk.LEFT)
     status_var = tk.StringVar(value="Loading…")
     ttk.Label(footer, textvariable=status_var, font=("Arial", 9),
-              foreground=readable_color("gray")).pack(side=tk.LEFT, padx=10)
+              style="Muted.TLabel").pack(side=tk.LEFT, padx=10)
     ttk.Button(footer, text="Close", width=9, command=dialog.destroy).pack(side=tk.RIGHT)
 
     # State
@@ -127,7 +129,12 @@ def browse_container_files_dialog(root, display_manager):
         entries.sort(key=lambda e: (0 if e['type'] == 'd' else 1, e['name'].lower()))
         return entries
 
-    def _load_path(path):
+    def _load_path(path, on_not_dir=None):
+        """List `path` (made absolute: ls in the container would resolve a relative one against
+        its WORKDIR). `on_not_dir` runs instead when it turns out to be a file (a symlink target)."""
+        path = posixpath.normpath(posixpath.join("/", path))
+        if path.startswith("//"):
+            path = path[1:]
         current_path[0] = path
         path_var.set(path)
         status_var.set(f"Loading {path}…")
@@ -138,7 +145,12 @@ def browse_container_files_dialog(root, display_manager):
         dialog.update()
 
         def task():
-            result = run_cmd(f"docker exec {container_id} ls -la {_quote(path)}", sudo=True, sudo_password=get_sudo_password())
+            # trailing '/': a symlink to a directory lists the directory, not the link
+            listed = path if path == "/" else path + "/"
+            result = run_cmd(f"docker exec {container_id} ls -la {_quote(listed)}", sudo=True, sudo_password=get_sudo_password())
+            if on_not_dir and "Not a directory" in result:
+                dialog.after(0, lambda: (_load_path(posixpath.dirname(path)), on_not_dir()))
+                return
             dialog.after(0, lambda: _on_loaded(result, path))
 
         startThreadForTask(task)
@@ -178,9 +190,12 @@ def browse_container_files_dialog(root, display_manager):
         meta = _row_meta.get(sel[0])
         if not meta:
             return
+        base = current_path[0].rstrip('/')
         if meta['type'] == 'd':
-            base = current_path[0].rstrip('/')
             _load_path(f"{base}/{meta['name']}")
+        elif meta['type'] == 'l':   # open it if it points at a directory (/bin, /lib …), else download
+            name = meta['name'].split(' -> ')[0].strip()
+            _load_path(f"{base}/{name}", on_not_dir=lambda: _download_file(name, base))
         else:
             _do_download()
 
@@ -191,8 +206,9 @@ def browse_container_files_dialog(root, display_manager):
         meta = _row_meta.get(sel[0])
         if not meta:
             return
-        raw_name = meta['name'].split(' -> ')[0].strip()
-        base = current_path[0].rstrip('/')
+        _download_file(meta['name'].split(' -> ')[0].strip(), current_path[0].rstrip('/'))
+
+    def _download_file(raw_name, base):
         src_path = f"{base}/{raw_name}"
         local_dest = filedialog.asksaveasfilename(
             parent=dialog, title="Save to host",
@@ -204,7 +220,8 @@ def browse_container_files_dialog(root, display_manager):
         dialog.update()
 
         def task():
-            result = run_cmd(f"docker cp {container_id}:{_quote(src_path)} {_quote(local_dest)}", sudo=True, sudo_password=get_sudo_password())
+            command = owned_by_user(f"docker cp {container_id}:{_quote(src_path)} {_quote(local_dest)}", local_dest)
+            result = run_cmd(command, sudo=True, sudo_password=get_sudo_password())
             msg = (f"✅ Saved → {local_dest}" if not result.strip() or result.strip().lower().startswith('successfully')
                    else f"❌ {result[:120]}")
             dialog.after(0, lambda: status_var.set(msg))
@@ -319,8 +336,12 @@ def open_container_terminal_dialog(root, display_manager):
     prompt = f'{container_name}({container_id[:12]})# '
     script_lines = [
         f'echo -ne "\\033]0;{container_name} ({container_id[:12]})\\007"',
-        f'{docker_prefix}{engine()} exec -it {cid_q} /bin/bash -c \'PS1="{prompt}" exec /bin/bash\' 2>/dev/null || \\',
-        f'{docker_prefix}{engine()} exec -it {cid_q} /bin/sh -c \'PS1="{prompt}" exec /bin/sh\'',
+        # pick the shell first: `bash … || sh …` would also start sh whenever bash exits non-zero
+        f'if {docker_prefix}{engine()} exec {cid_q} /bin/bash -c true >/dev/null 2>&1; then',
+        f'  {docker_prefix}{engine()} exec -it {cid_q} /bin/bash -c \'PS1="{prompt}" exec /bin/bash\'',
+        'else',
+        f'  {docker_prefix}{engine()} exec -it {cid_q} /bin/sh -c \'PS1="{prompt}" exec /bin/sh\'',
+        'fi',
     ]
     if askpass_path:
         script_lines.append(f'rm -f {_quote(askpass_path)}')
@@ -332,7 +353,9 @@ def open_container_terminal_dialog(root, display_manager):
     if success:
         def cleanup_script():
             import time
-            time.sleep(3)
+            # long enough for a slow emulator to start the script (and its sudo calls to read the
+            # askpass file); the script also removes the askpass file itself when the shell ends
+            time.sleep(60)
             for path in (script_path, askpass_path):
                 if path:
                     try:
@@ -368,10 +391,10 @@ def open_container_terminal_dialog(root, display_manager):
             error_frame.pack(pady=5, padx=20, fill=tk.X)
             ttk.Label(error_frame, text="Error:", font=("Arial", 9, "bold")).pack(anchor='w')
             ttk.Label(error_frame, text=last_error,
-                     font=("Arial", 8), foreground=readable_color("red"), wraplength=600).pack(anchor='w')
+                     font=("Arial", 8), style="Danger.TLabel", wraplength=600).pack(anchor='w')
 
             ttk.Label(error_frame, text="\n💡 Install a terminal emulator:",
-                     font=("Arial", 9, "bold"), foreground=readable_color("blue")).pack(anchor='w', pady=(10, 0))
+                     font=("Arial", 9, "bold"), style="Info.TLabel").pack(anchor='w', pady=(10, 0))
             install_cmd = terminals.install_hint()
             install_text = tk.Text(error_frame, height=1, font=("Courier New", 9), wrap=tk.NONE,
                                   bg="#f0f0f0", relief=tk.FLAT)
@@ -573,7 +596,7 @@ def show_logs_window(root, title, save_name, fetch_command, follow_command, time
         search_state['current_index'] = (search_state['current_index'] + step) % len(search_state['matches'])
         focus_current_match()
 
-    def set_logs_content(content, status_text=None, status_color=None, show_empty_message=True):
+    def set_logs_content(content, status_text=None, status_style="Success.TLabel", show_empty_message=True):
         logs_text.config(state=tk.NORMAL)
         logs_text.delete("1.0", tk.END)
         if content:
@@ -585,7 +608,7 @@ def show_logs_window(root, title, save_name, fetch_command, follow_command, time
         schedule_search_refresh()
 
         if status_text is not None:
-            status_label.config(text=status_text, foreground=readable_color(status_color or "green"))
+            status_label.config(text=status_text, style=status_style)
 
     def append_log_line(line):
         logs_text.config(state=tk.NORMAL)
@@ -603,14 +626,15 @@ def show_logs_window(root, title, save_name, fetch_command, follow_command, time
         lines = line_count()
         timestamps_flag = "--timestamps" if timestamps_var.get() else ""
 
-        status_label.config(text="⏳ Fetching logs...", foreground=readable_color("orange"))
+        status_label.config(text="⏳ Fetching logs...", style="Warning.TLabel")
         logs_text.config(state=tk.NORMAL)
         logs_text.delete(1.0, tk.END)
         logs_text.config(state=tk.DISABLED)
         logs_window.update()
 
         def fetch_task():
-            result = run_cmd(fetch_command(lines, timestamps_flag),
+            # 2>&1: a container's stderr lines are part of its log (docker logs replays them on stderr)
+            result = run_cmd(f"{fetch_command(lines, timestamps_flag)} 2>&1",
                              sudo=True, sudo_password=get_sudo_password())
 
             logs_window.after(
@@ -618,7 +642,6 @@ def show_logs_window(root, title, save_name, fetch_command, follow_command, time
                 lambda: set_logs_content(
                     result,
                     status_text=f"✓ Logs loaded ({lines} lines)",
-                    status_color="green",
                 ),
             )
 
@@ -632,7 +655,7 @@ def show_logs_window(root, title, save_name, fetch_command, follow_command, time
         follow_var.set(True)
         follow_check.config(state=tk.DISABLED)
         refresh_btn.config(state=tk.DISABLED)
-        status_label.config(text="📡 Following logs (live)...", foreground=readable_color("blue"))
+        status_label.config(text="📡 Following logs (live)...", style="Info.TLabel")
 
         timestamps_flag = "--timestamps" if timestamps_var.get() else ""
 
@@ -656,7 +679,7 @@ def show_logs_window(root, title, save_name, fetch_command, follow_command, time
                     follow_var.set(False)
                     follow_check.config(state=tk.NORMAL)
                     refresh_btn.config(state=tk.NORMAL)
-                status_label.config(text="✓ Stopped following logs", foreground=readable_color("gray"))
+                status_label.config(text="✓ Stopped following logs", style="Muted.TLabel")
             ui(finish)
 
         set_logs_content("", show_empty_message=False)
@@ -673,7 +696,7 @@ def show_logs_window(root, title, save_name, fetch_command, follow_command, time
             follow_var.set(False)
             follow_check.config(state=tk.NORMAL)
             refresh_btn.config(state=tk.NORMAL)
-            status_label.config(text="✓ Stopped following logs", foreground=readable_color("gray"))
+            status_label.config(text="✓ Stopped following logs", style="Muted.TLabel")
 
     def toggle_follow():
         if follow_var.get():
@@ -686,7 +709,7 @@ def show_logs_window(root, title, save_name, fetch_command, follow_command, time
         logs_text.delete(1.0, tk.END)
         logs_text.config(state=tk.DISABLED)
         schedule_search_refresh()
-        status_label.config(text="Logs cleared", foreground=readable_color("gray"))
+        status_label.config(text="Logs cleared", style="Muted.TLabel")
 
     def clear_search():
         search_var.set("")
@@ -703,7 +726,7 @@ def show_logs_window(root, title, save_name, fetch_command, follow_command, time
             try:
                 with open(filename, 'w') as f:
                     f.write(logs_text.get(1.0, tk.END))
-                status_label.config(text=f"✓ Logs saved to {filename}", foreground=readable_color("green"))
+                status_label.config(text=f"✓ Logs saved to {filename}", style="Success.TLabel")
             except Exception as e:
                 messagebox.showerror("Save Failed", f"Failed to save logs: {str(e)}", parent=logs_window)
 

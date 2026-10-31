@@ -59,7 +59,7 @@ from src.ui.ui_display import DisplayManager
 from src.ui.terminal_panel import TerminalPanel
 from src.ui.landing_page import LandingPage
 from src.ui.legal_view import ask_first_run, needs_acceptance, show_legal_dialog
-from src.ui.rounded import apply_rounded_styles, RoundedPanel, make, readable
+from src.ui.rounded import apply_rounded_styles, RoundedPanel, make, readable, surface_palette, stripe_rows
 from src.ui.keyboard_navigation import (
     setup_keyboard_navigation,
     enable_button_enter_key,
@@ -106,6 +106,12 @@ from src.shared.context_menus import setup_table_context_menu, setup_text_contex
 from src.shared.item_actions import create_selected_item_actions
 
 
+# Navigation buttons (sidebar categories, toolbar views) in every theme: the selected one filled,
+# the others outlined — the same pairing as the table's tab strip and Filters button
+ACTIVE_STYLE = "primary.TButton"
+NEUTRAL_STYLE = "secondary.Outline.TButton"
+
+
 class DockerGUI:
     """Main Docker GUI Application"""
     
@@ -137,6 +143,7 @@ class DockerGUI:
         
         # References to manually themed widgets (updated on theme change)
         self.sidebar = None
+        self._separators = []
         
         # State variables
         self.docker_status_var = tk.StringVar()
@@ -231,7 +238,12 @@ class DockerGUI:
         """Setup TTK styles via ttkbootstrap"""
         self.style = ttkbs.Style()  # returns the singleton created by Window
         self.current_theme = self.initial_theme
-        self._configure_treeview_grid(themes[self.current_theme])
+        self._style_theme()
+
+    def _style_theme(self):
+        """Settings of the app's own ttk styles. ttk keeps styles per theme, so this runs again
+        after every theme switch (a theme visited later would otherwise miss them)."""
+        apply_rounded_styles(self.style, self.root)     # also builds every button style first
         for style_name in (
             "TButton", "primary.TButton", "secondary.TButton", "success.TButton",
             "danger.TButton", "warning.TButton", "info.TButton",
@@ -240,12 +252,12 @@ class DockerGUI:
             "warning.Outline.TButton", "info.Outline.TButton",
         ):
             self.style.configure(style_name, padding=(6, 2))
-        apply_rounded_styles(self.style, self.root)
-    
-    def _configure_treeview_grid(self, theme):
+        self._configure_treeview_grid()
+
+    def _configure_treeview_grid(self):
         """Apply cell-border / grid-line styling to the Treeview widget."""
-        border_color = theme.get("tree_border", "#555555")
-        
+        border_color = surface_palette()["line"]
+
         # fieldbackground is the "canvas" behind rows; row tags paint their own
         # background, so the 1–2 px gap between rows exposes this border color
         # → horizontal grid lines.
@@ -276,22 +288,25 @@ class DockerGUI:
 
         # Create sidebar
         self.create_sidebar(main_container)
+        self._separator(main_container, width=1).pack(side=tk.LEFT, fill=tk.Y)
 
         # Create main content area
         self.create_main_content(main_container)
     
     def create_sidebar(self, parent):
         """Create left sidebar with menu"""
-        theme = themes[self.current_theme]
-        self.sidebar = tk.Frame(parent, width=210, bg=theme["sidebar_bg"])
+        # The sidebar uses the theme's own surface: the ttk widgets inside it (buttons, theme
+        # selector, bottom area) paint that colour, so any other shade would show around them
+        palette = surface_palette()
+        self.sidebar = tk.Frame(parent, width=210, bg=palette["surface"])
         self.sidebar.pack(side=tk.LEFT, fill=tk.Y)
         self.sidebar.pack_propagate(False)
         sidebar = self.sidebar
-        
+
         # App title in sidebar
         self.sidebar_title_label = tk.Label(
             sidebar, text="🐳 Docker Control Panel",
-            bg=theme["sidebar_bg"], fg="#4ea8f7",
+            bg=palette["surface"],
             font=("Arial", 10, "bold")
         )
         self.sidebar_title_label.pack(pady=(14, 2), padx=14, anchor=tk.W)
@@ -300,14 +315,14 @@ class DockerGUI:
         self.sidebar_status_label = tk.Label(
             sidebar,
             textvariable=self.docker_status_var,
-            bg=theme["sidebar_bg"], fg="#888888",
+            bg=palette["surface"],
             font=("Arial", 8),
         )
         self.sidebar_status_label.pack(padx=14, pady=(0, 6), anchor=tk.W)
-        self._apply_sidebar_text_colors(theme)
+        self._apply_sidebar_text_colors(palette)
 
         # Thin separator line
-        tk.Frame(sidebar, bg="#333355", height=1).pack(fill=tk.X, padx=14, pady=(0, 8))
+        self._separator(sidebar, height=1).pack(fill=tk.X, padx=14, pady=(0, 8))
         
         # Menu structure
         menu_structure = get_menu_structure(
@@ -401,29 +416,29 @@ class DockerGUI:
             "Stats": "📊",
             "System": "⚙",
         }
-        theme = themes[self.current_theme]
+        palette = surface_palette()
         for category in menu_structure.keys():
             icon = icons.get(category, "•")
 
             # Row frame holds the accent indicator + the button side-by-side
-            row_frame = tk.Frame(sidebar, bg=theme["sidebar_bg"])
+            row_frame = tk.Frame(sidebar, bg=palette["surface"])
             row_frame.pack(pady=2, padx=10, fill=tk.X)
 
             # Left accent strip — always present, color shows active state
-            indicator = tk.Frame(row_frame, width=4, bg=theme["sidebar_bg"])
+            indicator = tk.Frame(row_frame, width=4, bg=palette["surface"])
             indicator.pack(side=tk.LEFT, fill=tk.Y)
 
             # Fixed-width icon cell so all category labels start at the same X
-            icon_cell = tk.Frame(row_frame, width=28, bg=theme["sidebar_bg"])
+            icon_cell = tk.Frame(row_frame, width=28, bg=palette["surface"])
             icon_cell.pack(side=tk.LEFT, fill=tk.Y, padx=(4, 0))
             icon_cell.pack_propagate(False)
             icon_lbl = tk.Label(icon_cell, text=icon, font=("Arial", 11),
-                                bg=theme["sidebar_bg"], fg=theme["text_fg"],
+                                bg=palette["surface"], fg=palette["text"],
                                 anchor="center")
             icon_lbl.pack(fill=tk.BOTH, expand=True)
 
             btn = ttk.Button(
-                row_frame, text=f" {category}",
+                row_frame, text=f" {category}", style=NEUTRAL_STYLE,
                 command=self.make_sidebar_command(category),
             )
             btn.pack(side=tk.LEFT, fill=tk.X, expand=True)
@@ -441,7 +456,7 @@ class DockerGUI:
                 Tooltip(btn, SIDEBAR_TOOLTIPS[category])
         
         # Separator before bottom area
-        tk.Frame(sidebar, bg="#333355", height=1).pack(fill=tk.X, padx=14, pady=(12, 8))
+        self._separator(sidebar, height=1).pack(fill=tk.X, padx=14, pady=(12, 8))
         
         # Theme selector
         self.create_theme_selector(sidebar)
@@ -449,9 +464,17 @@ class DockerGUI:
         # Password management and status at bottom
         self.create_sidebar_bottom(sidebar)
     
-    def _apply_sidebar_text_colors(self, theme):
+    def _separator(self, parent, **size):
+        """Thin line in the theme's line colour (repainted by apply_theme). The colour is set after
+        construction: ttkbootstrap discards a bg passed to a tk widget's constructor."""
+        line = tk.Frame(parent, **size)
+        line.configure(bg=surface_palette()["line"])
+        self._separators.append(line)
+        return line
+
+    def _apply_sidebar_text_colors(self, palette):
         """Title and status text keep their hue but are adjusted to be legible on this sidebar."""
-        bg = theme["sidebar_bg"]
+        bg = palette["surface"]
         self.sidebar_title_label.configure(fg=readable("#4ea8f7", bg))
         self.sidebar_status_label.configure(fg=readable("#888888", bg))
 
@@ -596,13 +619,13 @@ class DockerGUI:
     
     def create_text_widget(self, parent):
         """Create text output widget"""
-        theme = themes[self.current_theme]
+        palette = surface_palette()
         text_frame = ttk.Frame(parent)
         text_widget = tk.Text(
             text_frame, wrap=tk.NONE,
             font=("JetBrains Mono", 10),
-            bg=theme["text_bg"], fg=theme["text_fg"],
-            insertbackground=theme["text_fg"],
+            bg=palette["field"], fg=palette["field_text"],
+            insertbackground=palette["field_text"],
             relief=tk.FLAT, borderwidth=0, padx=8, pady=6
         )
         text_widget.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
@@ -723,82 +746,68 @@ class DockerGUI:
             theme_name = DEFAULT_THEME
 
         self.current_theme = theme_name
-        theme = themes[theme_name]
         self.theme_var.set(theme_name)
-        
+
         # Switch ttkbootstrap theme (updates all ttk widgets automatically)
-        self.style.theme_use(theme["ttkbs_theme"])
-        
-        # Update manually-coloured tk widgets
-        self.root.configure(bg=theme["root_bg"])
-        
+        self.style.theme_use(themes[theme_name]["ttkbs_theme"])
+        # The app's own style settings (rounded corners, padding, table grid) for this theme
+        self._style_theme()
+
+        # Update manually-coloured tk widgets: every colour comes from the theme's palette, so
+        # a theme looks the same however often it is selected
+        palette = surface_palette()
+        self.root.configure(bg=palette["surface"])
+
         if self.sidebar and self.sidebar.winfo_exists():
-            self.sidebar.configure(bg=theme["sidebar_bg"])
+            self.sidebar.configure(bg=palette["surface"])
             for child in self.sidebar.winfo_children():
-                if isinstance(child, tk.Frame):
-                    child.configure(bg=theme["sidebar_bg"])
-                elif isinstance(child, tk.Label):
-                    child.configure(bg=theme["sidebar_bg"])
+                if isinstance(child, (tk.Frame, tk.Label)):
+                    child.configure(bg=palette["surface"])
+        for separator in self._separators:
+            if separator.winfo_exists():
+                separator.configure(bg=palette["line"])
 
         # Repaint sidebar row frames, accent indicators, and icon labels for the new theme
         for cat in self.sidebar_buttons:
             if cat in self.sidebar_row_frames and self.sidebar_row_frames[cat].winfo_exists():
-                self.sidebar_row_frames[cat].configure(bg=theme["sidebar_bg"])
+                self.sidebar_row_frames[cat].configure(bg=palette["surface"])
             if cat in self.sidebar_indicators and self.sidebar_indicators[cat].winfo_exists():
                 is_active = (cat == self.active_category)
                 self.sidebar_indicators[cat].configure(
-                    bg=theme["indicator_color"] if is_active else theme["sidebar_bg"]
+                    bg=palette["accent"] if is_active else palette["surface"]
                 )
             if cat in self.sidebar_icon_labels and self.sidebar_icon_labels[cat].winfo_exists():
-                self.sidebar_icon_labels[cat].configure(
-                    bg=theme["sidebar_bg"], fg=theme["text_fg"]
-                )
+                self.sidebar_icon_labels[cat].configure(bg=palette["surface"], fg=palette["text"])
         if hasattr(self, 'sidebar_status_label') and self.sidebar_status_label.winfo_exists():
-            self.sidebar_status_label.configure(bg=theme["sidebar_bg"])
-            self.sidebar_title_label.configure(bg=theme["sidebar_bg"])
-            self._apply_sidebar_text_colors(theme)
-        
+            self.sidebar_status_label.configure(bg=palette["surface"])
+            self.sidebar_title_label.configure(bg=palette["surface"])
+            self._apply_sidebar_text_colors(palette)
+
         self.display_manager.text_widget.configure(
-            bg=theme["text_bg"], fg=theme["text_fg"],
-            insertbackground=theme["text_fg"]
+            bg=palette["field"], fg=palette["field_text"],
+            insertbackground=palette["field_text"]
         )
-        
-        # Commands / Help tabs are built from ttk widgets and follow the theme on their own
 
-        # Update treeview alternating rows
-        tw = self.display_manager.table_widget
-        tw.tag_configure('oddrow', background=theme["tree_odd"])
-        tw.tag_configure('evenrow', background=theme["tree_even"])
+        # Commands / Help tabs are built from ttk widgets and follow the theme on their own;
+        # table row stripes follow it through stripe_rows
         self.display_manager.apply_status_colors()
-        
-        # Reapply cell-border / grid-line treeview styling for new theme
-        self._configure_treeview_grid(theme)
-
-        # Rounded corners belong to the theme's styles, so they are rebuilt for the new theme
-        apply_rounded_styles(self.style, self.root)
-        
-        # Reapply active button highlights using the new theme's style
-        if self.active_button and self.active_button.winfo_exists():
-            self.active_button.configure(style=theme["active_style"])
-        if self.active_sidebar_button and self.active_sidebar_button.winfo_exists():
-            self.active_sidebar_button.configure(style=theme["active_style"])
 
         save_selected_theme(theme_name)
-    
+
     def make_sidebar_command(self, category):
         """Create sidebar button command"""
         def wrapper():
-            theme = themes[self.current_theme]
+            palette = surface_palette()
             # Reset all sidebar buttons and indicators
             for cat, btn in self.sidebar_buttons.items():
-                btn.configure(style='TButton')
+                btn.configure(style=NEUTRAL_STYLE)
                 if cat in self.sidebar_indicators:
-                    self.sidebar_indicators[cat].configure(bg=theme["sidebar_bg"])
+                    self.sidebar_indicators[cat].configure(bg=palette["surface"])
 
             # Highlight the selected button with fill style + left accent strip
             if category in self.sidebar_buttons:
-                self.sidebar_buttons[category].configure(style=theme["active_style"])
-                self.sidebar_indicators[category].configure(bg=theme["indicator_color"])
+                self.sidebar_buttons[category].configure(style=ACTIVE_STYLE)
+                self.sidebar_indicators[category].configure(bg=palette["accent"])
                 self.active_sidebar_button = self.sidebar_buttons[category]
                 self.active_sidebar_button_ref['button'] = self.active_sidebar_button
                 self.active_category = category
@@ -880,12 +889,12 @@ class DockerGUI:
                         elif any(w in t_lower for w in _SUCCESS_WORDS):
                             self.active_button.configure(style='success.Outline.TButton')
                         else:
-                            self.active_button.configure(style='TButton')
-                    
+                            self.active_button.configure(style=NEUTRAL_STYLE)
+
                     # Highlight current button
                     btn = self.category_buttons.get(btn_text)
                     if btn:
-                        btn.configure(style='primary.TButton')
+                        btn.configure(style=ACTIVE_STYLE)
                         self.active_button = btn
                     
                     # Remember list-switching buttons so row actions can reload the list
@@ -906,7 +915,7 @@ class DockerGUI:
             elif any(w in text_lower for w in _SUCCESS_WORDS):
                 init_style = 'success.Outline.TButton'
             else:
-                init_style = 'TButton'
+                init_style = NEUTRAL_STYLE
             
             btn = ttk.Button(self.btn_frame, text=text, style=init_style,
                              command=make_command(cmd, text))
@@ -919,7 +928,7 @@ class DockerGUI:
             
             # Execute first command automatically for non-Docker categories
             if i == 0 and cmd and category not in ["Docker"]:
-                btn.configure(style='primary.TButton')
+                btn.configure(style=ACTIVE_STYLE)
                 self.active_button = btn
                 if text in VIEW_BUTTONS.get(category, ()):
                     self.display_manager.view_refresh = cmd
@@ -950,10 +959,9 @@ class DockerGUI:
     def select_initial_category(self):
         """Select Docker category on startup"""
         if "Docker" in self.sidebar_buttons:
-            theme = themes[self.current_theme]
-            self.sidebar_buttons["Docker"].configure(style=theme["active_style"])
+            self.sidebar_buttons["Docker"].configure(style=ACTIVE_STYLE)
             if "Docker" in self.sidebar_indicators:
-                self.sidebar_indicators["Docker"].configure(bg=theme["indicator_color"])
+                self.sidebar_indicators["Docker"].configure(bg=surface_palette()["accent"])
             self.active_sidebar_button = self.sidebar_buttons["Docker"]
             self.active_sidebar_button_ref['button'] = self.active_sidebar_button
             self.active_category = "Docker"
@@ -961,13 +969,9 @@ class DockerGUI:
         # Ensure help panel is visible for Docker category
         self.help_panel.pack(side=tk.RIGHT, fill=tk.Y, padx=(8, 0))
         # Apply initial theme colours to treeview
-        theme = themes[self.current_theme]
-        tw = self.display_manager.table_widget
-        tw.tag_configure('oddrow', background=theme["tree_odd"])
-        tw.tag_configure('evenrow', background=theme["tree_even"])
+        stripe_rows(self.display_manager.table_widget)
         self.display_manager.apply_status_colors()
-        self._configure_treeview_grid(theme)
-    
+
     def relaunch_app(self):
         """Relaunch the application"""
         import os

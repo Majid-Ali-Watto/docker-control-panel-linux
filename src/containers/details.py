@@ -4,9 +4,38 @@ networks, mounts and environment.
 """
 
 import json
+import re
 
 _NO_TIME = "0001-01-01T00:00:00Z"
-_SECRET_WORDS = ("PASSWORD", "PASSWD", "SECRET", "TOKEN", "PRIVATE_KEY", "API_KEY", "APIKEY", "CREDENTIAL")
+_SECRET_WORDS = ("PASSWORD", "PASSWD", "PASSPHRASE", "SECRET", "TOKEN", "APIKEY", "CREDENTIAL")
+# whole name parts (split on _ - .) that mark a secret: DB_PASS, AWS_ACCESS_KEY_ID, BASIC_AUTH …
+_SECRET_PARTS = {"PASS", "PWD", "KEY", "AUTH", "CREDS"}
+_NOT_SECRET = {"PWD", "OLDPWD"}   # the shell's working directories
+_MASK = "••••••••"
+
+
+def _is_secret(name):
+    name = str(name).upper().lstrip("-")
+    if name in _NOT_SECRET:
+        return False
+    return (any(word in name for word in _SECRET_WORDS)
+            or any(part in _SECRET_PARTS for part in re.split(r"[_.\-]", name)))
+
+
+def _masked_command(args):
+    """The command line with secret-looking values hidden: --password=x, --token x, API_KEY=x."""
+    shown, hide_next = [], False
+    for arg in args:
+        arg = str(arg)
+        name, sep, value = arg.partition("=")
+        if hide_next:
+            shown.append(_MASK)
+        elif sep and value and _is_secret(name):
+            shown.append(f"{name}={_MASK}")
+        else:
+            shown.append(arg)
+        hide_next = arg.startswith("-") and not sep and (_is_secret(arg) or "PASS" in arg.upper())   # --requirepass
+    return " ".join(shown)
 
 
 def _yes_no(value):
@@ -26,8 +55,8 @@ def _environment(config):
     lines = []
     for entry in config.get("Env") or []:
         key, sep, value = str(entry).partition("=")
-        hidden = sep and value and any(word in key.upper() for word in _SECRET_WORDS)
-        lines.append(f"{key}=••••••••" if hidden else str(entry))
+        hidden = sep and value and _is_secret(key)
+        lines.append(f"{key}={_MASK}" if hidden else str(entry))
     return lines
 
 
@@ -79,7 +108,7 @@ def format_container_details(inspect_text):
     restart_policy = policy.get("Name") or "no"
     if restart_policy == "on-failure" and policy.get("MaximumRetryCount"):
         restart_policy += f":{policy['MaximumRetryCount']}"
-    command = " ".join((config.get("Entrypoint") or []) + (config.get("Cmd") or [])) or "—"
+    command = _masked_command((config.get("Entrypoint") or []) + (config.get("Cmd") or [])) or "—"
 
     lines = [
         f"Container   {data.get('Name', '').lstrip('/')}  ({str(data.get('Id', ''))[:12]})",

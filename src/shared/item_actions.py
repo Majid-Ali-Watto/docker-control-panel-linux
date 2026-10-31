@@ -28,9 +28,11 @@ from src.docker.commands import (
 from src.containers.details import format_container_details
 from src.ui.ui_components import Tooltip, confirm_action_dialog
 from src.utils.utils import run_cmd, async_run
+from src.utils.threads import startThreadForTask
 from src.shared.helpers import (
-    _quote, _join_quoted, _join_flag_values, _split_csv_lines,
-    _compose_files_to_args, _center_dialog, _make_output_callback, is_error_output,
+    _quote, _join_quoted, _join_flag_values, _split_csv_lines, _split_lines,
+    _compose_files_to_args, _center_dialog, _make_output_callback, is_error_output, parse_json_records,
+    owned_by_user,
 )
 import shlex
 
@@ -92,6 +94,7 @@ def create_selected_item_actions(action_frame, root, display_manager, refresh_im
             sudo_password=get_sudo_password(),
             callback=on_done,
             loading_callback=show_loading_callback,
+            cancellable=False,
         )
 
     def _prompt_value(title, label, initial_value=""):
@@ -278,7 +281,8 @@ def create_selected_item_actions(action_frame, root, display_manager, refresh_im
         if not filename:
             return
         _run_mutation(
-            DOCKER_CONTAINER_EXPORT.format(output_file=_quote(filename), container=_quote(rows[0][1])),
+            owned_by_user(DOCKER_CONTAINER_EXPORT.format(output_file=_quote(filename),
+                                                         container=_quote(rows[0][1])), filename),
             "Container Export",
         )
 
@@ -343,7 +347,8 @@ def create_selected_item_actions(action_frame, root, display_manager, refresh_im
         if not filename:
             return
         _run_mutation(
-            DOCKER_IMAGE_SAVE.format(output_file=_quote(filename), image=_quote(_image_ref(rows[0]))),
+            owned_by_user(DOCKER_IMAGE_SAVE.format(output_file=_quote(filename),
+                                                   image=_quote(_image_ref(rows[0]))), filename),
             "Image Save",
         )
 
@@ -375,15 +380,13 @@ def create_selected_item_actions(action_frame, root, display_manager, refresh_im
         from src.images.dialogs import scan_image
         scan_image(root, _image_ref(rows[0]), display_manager.show_text_output, show_loading_callback)
 
-    def use_selected_context():
-        if not check_docker_running(): return
+    def use_selected_context():   # no local daemon check: the context may point elsewhere
         rows = _selected_rows("context", table_type='context', allow_multiple=False)
         if not rows:
             return
         _run_mutation(DOCKER_CONTEXT_USE.format(context=_quote(rows[0][1])), "Context Use")
 
     def inspect_selected_context():
-        if not check_docker_running(): return
         rows = _selected_rows("context", table_type='context', allow_multiple=False)
         if not rows:
             return
@@ -502,7 +505,6 @@ def create_selected_item_actions(action_frame, root, display_manager, refresh_im
 
         name_var = tk.StringVar()
         restart_var = tk.StringVar(value="unless-stopped")
-        network_names = [name for name in run_cmd(DOCKER_NETWORK_NAMES, sudo=True, sudo_password=get_sudo_password()).splitlines() if name.strip()]
         network_var = tk.StringVar(value="")
         command_var = tk.StringVar()
 
@@ -513,13 +515,20 @@ def create_selected_item_actions(action_frame, root, display_manager, refresh_im
         ttk.Combobox(dialog, textvariable=restart_var, values=["unless-stopped", "always", "on-failure", "no"], state="readonly", width=42).grid(row=2, column=1, sticky="ew", padx=16, pady=4)
 
         ttk.Label(dialog, text="Network:", font=("Arial", 10)).grid(row=3, column=0, sticky="w", padx=16, pady=4)
-        ttk.Combobox(dialog, textvariable=network_var, values=[""] + network_names, state="readonly", width=42).grid(row=3, column=1, sticky="ew", padx=16, pady=4)
+        network_box = ttk.Combobox(dialog, textvariable=network_var, values=[""], state="readonly", width=42)
+        network_box.grid(row=3, column=1, sticky="ew", padx=16, pady=4)
+
+        def load_networks():   # off the Tk thread; error text must not turn into network names
+            result = run_cmd(DOCKER_NETWORK_NAMES, sudo=True, sudo_password=get_sudo_password())
+            names = [] if is_error_output(result) else [n for n in result.splitlines() if n.strip()]
+            dialog.after(0, lambda: dialog.winfo_exists() and network_box.config(values=[""] + names))
+        startThreadForTask(load_networks)
 
         ttk.Label(dialog, text="Ports (one per line, e.g. 8080:80):", font=("Arial", 10)).grid(row=4, column=0, columnspan=2, sticky="w", padx=16, pady=(8, 4))
         ports_text = tk.Text(dialog, height=3, width=50, font=("JetBrains Mono", 9))
         ports_text.grid(row=5, column=0, columnspan=2, sticky="ew", padx=16, pady=4)
 
-        ttk.Label(dialog, text="Environment (KEY=VALUE):", font=("Arial", 10)).grid(row=6, column=0, columnspan=2, sticky="w", padx=16, pady=(8, 4))
+        ttk.Label(dialog, text="Environment (KEY=VALUE, one per line):", font=("Arial", 10)).grid(row=6, column=0, columnspan=2, sticky="w", padx=16, pady=(8, 4))
         env_text = tk.Text(dialog, height=3, width=50, font=("JetBrains Mono", 9))
         env_text.grid(row=7, column=0, columnspan=2, sticky="ew", padx=16, pady=4)
 
@@ -534,7 +543,7 @@ def create_selected_item_actions(action_frame, root, display_manager, refresh_im
 
         def on_run():
             ports = _split_csv_lines(ports_text.get("1.0", tk.END))
-            envs = _split_csv_lines(env_text.get("1.0", tk.END))
+            envs = _split_lines(env_text.get("1.0", tk.END))
             volumes = _split_csv_lines(volume_text.get("1.0", tk.END))
 
             command_tail = ""
@@ -576,6 +585,9 @@ def create_selected_item_actions(action_frame, root, display_manager, refresh_im
         all_containers = []
         for row in rows:
             containers = run_cmd(DOCKER_INSPECT_ANCESTOR.format(image_id=row[3]), sudo=True, sudo_password=get_sudo_password())
+            if is_error_output(containers):
+                display_manager.show_text_output(f"Could not list containers using the image\n\n{containers}")
+                return
             if containers:
                 all_containers.extend(containers.splitlines())
 
@@ -667,26 +679,21 @@ def create_selected_item_actions(action_frame, root, display_manager, refresh_im
             return
 
         def callback(result):
-            import json as _json
             service_rows = []
-            try:
-                data = _json.loads(result.strip() or "[]")
-                for item in data:
-                    ports = item.get("Publishers") or item.get("Ports") or ""
-                    if isinstance(ports, list):
-                        ports = ", ".join(
-                            f"{p.get('PublishedPort', '')}:{p.get('TargetPort', '')}/{p.get('Protocol', '')}"
-                            for p in ports if p.get("PublishedPort")
-                        )
-                    service_rows.append([
-                        item.get("ID", "")[:12],
-                        item.get("Name", ""),
-                        item.get("Service", ""),
-                        item.get("State", ""),
-                        str(ports),
-                    ])
-            except (_json.JSONDecodeError, TypeError):
-                pass
+            for item in parse_json_records(result):
+                ports = item.get("Publishers") or item.get("Ports") or ""
+                if isinstance(ports, list):
+                    ports = ", ".join(
+                        f"{p.get('PublishedPort', '')}:{p.get('TargetPort', '')}/{p.get('Protocol', '')}"
+                        for p in ports if isinstance(p, dict) and p.get("PublishedPort")
+                    )
+                service_rows.append([
+                    str(item.get("ID", ""))[:12],
+                    item.get("Name", ""),
+                    item.get("Service", ""),
+                    item.get("State", ""),
+                    str(ports),
+                ])
             display_manager.show_table(
                 ["CONTAINER ID", "NAME", "SERVICE", "STATE", "PORTS"],
                 service_rows,

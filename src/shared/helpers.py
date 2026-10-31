@@ -2,6 +2,8 @@
 Shared helper functions used across multiple dialog modules.
 """
 
+import json
+import os
 import shlex
 
 _ERROR_HINTS = (
@@ -12,6 +14,11 @@ _ERROR_HINTS = (
 
 def _quote(value):
     return shlex.quote(str(value))
+
+
+def _split_lines(raw_text):
+    """One value per non-blank line — for KEY=VALUE entries, whose values may contain commas."""
+    return [line.strip() for line in str(raw_text).splitlines() if line.strip()]
 
 
 def _split_csv_lines(raw_text):
@@ -46,8 +53,43 @@ def _center_dialog(dialog, min_width=420):
     dialog.geometry(f"{width}x{height}+{x}+{y}")
 
 
+def owned_by_user(command, path):
+    """`command`, which writes `path` on the host, followed by handing the file back to the user
+    when it runs through sudo (it would stay root-owned in the user's folder otherwise)."""
+    from src.config.config_manager import get_sudo_password
+    if not get_sudo_password() or os.geteuid() == 0:
+        return command
+    return f"{command} && chown -R {os.getuid()}:{os.getgid()} {_quote(path)}"
+
+
+def parse_json_records(text):
+    """Objects from docker's `--format json` output: one JSON array (compose ls, older compose ps)
+    or one object per line (newer compose ps). Lines that are not JSON (WARN …) are skipped."""
+    text = str(text or "").strip()
+    try:
+        data = json.loads(text or "[]")
+        return [item for item in (data if isinstance(data, list) else [data]) if isinstance(item, dict)]
+    except ValueError:
+        pass
+    records = []
+    for line in text.splitlines():
+        line = line.strip()
+        if not line.startswith(("{", "[")):
+            continue
+        try:
+            data = json.loads(line)
+        except ValueError:
+            continue
+        records.extend(item for item in (data if isinstance(data, list) else [data]) if isinstance(item, dict))
+    return records
+
+
 def is_error_output(text):
-    """True when docker/sudo output looks like a failure."""
+    """True when a command failed: its exit status when run_cmd supplied one (output text alone
+    misleads — `docker stop error-page` prints the name), else the output looks like a failure."""
+    returncode = getattr(text, "returncode", None)
+    if returncode is not None:
+        return returncode != 0
     text = str(text).lower()
     return any(hint in text for hint in _ERROR_HINTS)
 
